@@ -1,33 +1,42 @@
-// Save / load through localStorage. Progress is cash, completed jobs and the
-// next mission — the world itself is rebuilt fresh on every load.
+// save.js — localStorage save / load for SOLMAR BAY.
+import { SAVE_KEY } from "./config.js";
 
-const KEY = 'solmarbay.save.v1';
-
-export function saveGameData(data) {
+export function saveGame(state) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    const p = state.player;
+    const data = {
+      v: 1,
+      money: Math.floor(p.money),
+      health: p.health,
+      x: Math.round(p.x),
+      y: Math.round(p.y),
+      missionIndex: state.mission.index,
+      wanted: 0,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
-  } catch (err) {
+  } catch (e) {
     return false;
   }
 }
 
-export function loadGameData() {
+export function loadGame() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data !== 'object' || data === null) return null;
-    return data;
-  } catch (err) {
+    const d = JSON.parse(raw);
+    if (!d || d.v !== 1) return null;
+    return d;
+  } catch (e) {
     return null;
   }
 }
 
-export function clearGameData() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch (err) {
-    /* storage unavailable */
-  }
+export function hasSave() {
+  return loadGame() !== null;
+}
+
+export function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
 }

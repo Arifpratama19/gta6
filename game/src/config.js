@@ -1,142 +1,83 @@
-// SOLMAR BAY — shared tuning, palette and story data.
-// A sun-soaked coastal city on the fictional Vice Coast. Everything here is
-// original: the city, its districts, its people and its story.
-
-export const CONFIG = {
-  title: 'SOLMAR BAY',
-  subtitle: 'Vice Coast Stories',
-  world: {
-    half: 450,            // playable half-extent in metres
-    roadStep: 90,         // distance between parallel roads
-    roadWidth: 15,
-    beachX: 380,          // east of this the sand starts
-    waterX: 430,          // east of this the ocean starts
-  },
-  player: {
-    walkSpeed: 6.5,
-    runSpeed: 11,
-    health: 100,
-    startCash: 500,
-  },
-  car: {
-    accel: 26,
-    brake: 42,
-    reverseAccel: 14,
-    maxSpeed: 46,
-    maxReverse: 12,
-    steer: 1.9,
-    grip: 6.5,
-  },
-  wanted: {
-    max: 5,
-    decayQuietSeconds: 18,
-    decayStepSeconds: 7,
-  },
-  traffic: { count: 16, minSpeed: 7, maxSpeed: 13 },
-  peds: { count: 26 },
-  palette: {
-    skyTop: 0x2f7fd0,
-    skyBottom: 0xffd9a0,
-    sun: 0xfff1c4,
-    ocean: 0x1b7fa8,
-    sand: 0xe8d29a,
-    asphalt: 0x2e2f36,
-    sidewalk: 0x9a938a,
-    grass: 0x4f9e4d,
-  },
-  districts: [
-    { name: 'Downtown', cx: -40, cz: -120, r: 170, tall: true },
-    { name: 'Neon Plaza', cx: -180, cz: 140, r: 130, tall: false },
-    { name: 'Marina', cx: 300, cz: -180, r: 120, tall: false },
-    { name: 'Little Havana Row', cx: -260, cz: -260, r: 120, tall: false },
-    { name: 'The Docks', cx: 300, cz: 240, r: 120, tall: false },
-  ],
+// SOLMAR BAY — Vice Coast Stories
+// config.js — world constants, palette, tuning. All values in world units (px) / seconds.
+export const WORLD = {
+  w: 2600,          // world width
+  h: 2000,          // world height
+  roadGap: 320,     // distance between road centerlines
+  roadW: 64,        // road width
+  sidewalkW: 14,    // sidewalk width beside roads
+  beachX: 2180,     // x where sand starts (east edge)
+  waterX: 2380,     // x where ocean starts
 };
 
-// The story: Rico Vega, a getaway driver back in Solmar Bay, takes jobs from
-// Mara Solis to pay off his brother's debt to the Coral Kings crew.
-export const STORY = {
-  hero: 'Rico Vega',
-  fixer: 'Mara Solis',
-  crew: 'Coral Kings',
-  intro:
-    'Rico Vega is back in Solmar Bay. His brother owes the Coral Kings $50,000. ' +
-    'Mara Solis has five jobs that pay it off — if Rico survives them.',
+export const PALETTE = {
+  ocean: "#1b7fb8",
+  oceanDeep: "#14639a",
+  sand: "#e8d39a",
+  sandWet: "#dcc27e",
+  grass: "#7fae5a",
+  grassDry: "#a8b06a",
+  road: "#3a3d46",
+  roadLine: "#e8e4c8",
+  sidewalk: "#9aa0a8",
+  buildingRoof: ["#c96f4a", "#b85c5c", "#d9a05b", "#7fa8a0", "#8a7fb8", "#c98a5b", "#6a9a7a", "#b8b0a0"],
+  buildingWall: ["#a85a3a", "#96484a", "#b8864a", "#6a8a84", "#6f6596", "#a87048", "#557a62", "#968e80"],
+  carColors: ["#d43d2a", "#2a6fd4", "#e8c832", "#3aa84f", "#e8e8e8", "#222831", "#d47a2a", "#7a3ad4", "#2ad4c8"],
+  policeCar: "#1a2a4a",
+  player: "#f2c14e",
+  pedColors: ["#e87a5d", "#5d8ae8", "#7ae85d", "#e85db8", "#8a5de8", "#e8b25d"],
+};
+
+export const PLAYER = {
+  walkSpeed: 200,
+  runSpeed: 300,
+  radius: 13,
+  health: 100,
+  startMoney: 500,
+};
+
+export const CAR = {
+  accel: 420,        // forward accel px/s^2
+  brake: 700,
+  reverseAccel: 260,
+  maxSpeed: 520,     // px/s
+  maxReverse: 180,
+  turnRate: 2.6,     // rad/s at full steer (scaled by speed)
+  grip: 6.0,         // lateral velocity damping
+  length: 46,
+  width: 22,
+  health: 100,
+};
+
+export const WANTED = {
+  decayTime: 14,     // seconds without crime/sight before stars drop by 1
+  maxStars: 5,
+  policePerStar: [0, 1, 2, 3, 4, 6],
+  copSpeed: 540,
+};
+
+export const COMBAT = {
+  pistolDamage: 34,
+  pistolRange: 420,
+  pistolRate: 0.22,  // seconds between shots
+  bulletSpeed: 900,
+  enemyHealth: 70,
+  enemyDamage: 9,
+  enemyRange: 340,
+  enemyRate: 0.9,
 };
 
 export const MISSIONS = [
-  {
-    id: 'borrowed-wheels',
-    title: '1 — Borrowed Wheels',
-    brief: 'Mara needs wheels. Take any car on the street and bring it to the Marina.',
-    reward: 300,
-    steps: [
-      { type: 'enterCar', text: 'Steal a car — walk up to one and press E' },
-      { type: 'reach', x: 300, z: -180, radius: 14, text: 'Drive to the Marina marker' },
-    ],
-  },
-  {
-    id: 'the-drop',
-    title: '2 — The Drop',
-    brief: 'A package is waiting on the pier. Grab it on foot, then deliver it to Neon Plaza.',
-    reward: 600,
-    steps: [
-      { type: 'reach', x: 330, z: 60, radius: 10, text: 'Go to the pier pickup' },
-      { type: 'pickup', x: 330, z: 60, radius: 6, text: 'Pick up the package (walk into the marker)' },
-      { type: 'reach', x: -180, z: 140, radius: 14, text: 'Deliver the package to Neon Plaza' },
-    ],
-  },
-  {
-    id: 'hot-pursuit',
-    title: '3 — Hot Pursuit',
-    brief: 'The drop was watched. The Solmar Bay PD is on you — lose them and reach the safehouse.',
-    reward: 800,
-    heat: 2,
-    steps: [
-      { type: 'reach', x: -260, z: -260, radius: 14, text: 'Reach the safehouse in Little Havana Row' },
-    ],
-  },
-  {
-    id: 'pier-showdown',
-    title: '4 — Pier Showdown',
-    brief: 'The Coral Kings sent shooters to the pier. Clear them out.',
-    reward: 1200,
-    steps: [
-      { type: 'reach', x: 330, z: 60, radius: 26, text: 'Get to the pier' },
-      { type: 'eliminate', count: 5, x: 330, z: 60, text: 'Defeat the Coral Kings shooters (0/5)' },
-    ],
-  },
-  {
-    id: 'the-big-score',
-    title: '5 — The Big Score',
-    brief: 'Last job. Grab the getaway car and run the docks blockade to the east pier.',
-    reward: 2500,
-    heat: 3,
-    steps: [
-      { type: 'enterCar', text: 'Take the getaway car at the Marina' },
-      { type: 'reach', x: 330, z: 240, radius: 16, text: 'Break through to the Docks pier' },
-    ],
-  },
+  { id: 1, title: "Welcome to Solmar", pay: 200,
+    brief: "Rico Vega is back in town. Drive to the yellow marker at the Marina to meet your contact." },
+  { id: 2, title: "Wheels", pay: 400,
+    brief: "The crew needs wheels. Steal the red coupe parked near the Pier and deliver it to the garage." },
+  { id: 3, title: "Beach Party", pay: 600,
+    brief: "Rivals are muscling in on the beach. Go to the sand and take out the 4 gang members." },
+  { id: 4, title: "Hot Pursuit", pay: 800,
+    brief: "The heat is on. Lose the 3-star wanted level, then reach the safehouse on the north side." },
+  { id: 5, title: "The Big Score", pay: 1500,
+    brief: "One last job: hit the Solmar Bank, grab the cash, and escape the 4-star dragnet to the marina." },
 ];
 
-export const CAR_COLORS = [
-  0xd7263d, 0x1b9aaa, 0xf4d35e, 0x3a86ff, 0x8338ec, 0xff6d00,
-  0x06d6a0, 0xef476f, 0x118ab2, 0x8ac926, 0xe0e0e0, 0x222222,
-];
-
-export const PED_SHIRTS = [
-  0xe63946, 0xf4a261, 0x2a9d8f, 0xe9c46a, 0x6d28d9, 0xef476f,
-  0x118ab2, 0xffffff, 0x43aa8b, 0xf3722c, 0x577590, 0x90be6d,
-];
-
-export const CONTROLS = [
-  ['W A S D', 'Move / drive'],
-  ['Mouse', 'Look around (click to lock)'],
-  ['Shift', 'Sprint'],
-  ['E', 'Enter / exit car'],
-  ['Left click', 'Shoot'],
-  ['Space', 'Handbrake / jump'],
-  ['R', 'Radio on / off'],
-  ['M', 'Mute sound'],
-  ['Esc / P', 'Pause'],
-];
+export const SAVE_KEY = "solmarbay.save.v1";

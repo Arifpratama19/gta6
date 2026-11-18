@@ -1,196 +1,112 @@
-// The player on foot: a third-person character with orbit camera, sprint,
-// jump, and car entry/exit. Driving itself lives in vehicles.js.
+// player.js — Rico Vega on foot and behind the wheel.
+import { PLAYER, CAR } from "./config.js";
+import { keys, mouse, consumeEnter } from "./input.js";
+import { collideCircle } from "./city.js";
+import { clamp, dist } from "./util.js";
 
-import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { clamp, damp } from './util.js';
-
-function makePlayerMesh() {
-  const g = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x14b8a6 });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x1f2937 });
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.82, 0.36), jacket);
-  torso.position.y = 1.14;
-  torso.castShadow = true;
-  g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), skin);
-  head.position.y = 1.76;
-  head.castShadow = true;
-  g.add(head);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.27, 0.1, 12), new THREE.MeshLambertMaterial({ color: 0x111827 }));
-  cap.position.y = 1.94;
-  g.add(cap);
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.26), new THREE.MeshLambertMaterial({ color: 0x111827 }));
-  brim.position.set(0, 1.9, 0.3);
-  g.add(brim);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.74, 0.26), pants);
-  legL.position.set(-0.17, 0.37, 0);
-  g.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.17;
-  g.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.68, 0.19), jacket);
-  armL.position.set(-0.44, 1.12, 0);
-  g.add(armL);
-  const armR = armL.clone();
-  armR.position.x = 0.44;
-  g.add(armR);
-  g.userData = { legL, legR, armL, armR };
-  return g;
+export function createPlayer(x, y) {
+  return {
+    x, y, angle: -Math.PI / 2, // facing up
+    vx: 0, vy: 0,
+    health: PLAYER.health,
+    money: PLAYER.startMoney,
+    onFoot: true,
+    car: null,          // car object when driving
+    hurtTimer: 0,       // brief invulnerability flash after damage
+    dead: false,
+  };
 }
 
-export class Player {
-  constructor(scene) {
-    this.scene = scene;
-    this.mesh = makePlayerMesh();
-    this.mesh.position.set(0, 0, 40);
-    scene.add(this.mesh);
-    this.pos = this.mesh.position;
-    this.heading = 0;
-    this.camYaw = Math.PI;
-    this.camPitch = 0.32;
-    this.camDist = 12.5;
-    this.walkPhase = 0;
-    this.vy = 0;
-    this.onGround = true;
-    this.driving = null; // PlayerCar when behind the wheel
-    this.aiming = false;
+// find the nearest usable car within reach (parked or traffic, not a cop car)
+export function nearestCar(state, x, y, maxD) {
+  let best = null, bd = maxD * maxD;
+  for (const c of state.cars) {
+    if (c.destroyed || c.isCop) continue;
+    const d = (c.x - x) * (c.x - x) + (c.y - y) * (c.y - y);
+    if (d < bd) { bd = d; best = c; }
   }
+  return best;
+}
 
-  get x() { return this.pos.x; }
-  get z() { return this.pos.z; }
+export function updatePlayer(state, dt) {
+  const p = state.player;
+  if (p.dead) return;
+  if (p.hurtTimer > 0) p.hurtTimer -= dt;
 
-  enterCar(car) {
-    this.driving = car;
-    this.mesh.visible = false;
-    this.camDist = 12.5;
-  }
-
-  exitCar() {
-    if (!this.driving) return;
-    const car = this.driving;
-    this.driving = null;
-    const side = car.heading + Math.PI / 2;
-    this.pos.set(
-      car.pos.x + Math.sin(side) * 3.2,
-      0,
-      car.pos.z + Math.cos(side) * 3.2
-    );
-    this.heading = car.heading;
-    this.camYaw = car.heading + Math.PI;
-    this.mesh.visible = true;
-    this.camDist = 8.5;
-    return car;
-  }
-
-  update(dt, input, game) {
-    if (this.driving) {
-      this.driving.update(dt, input, game);
-      this.pos.copy(this.driving.pos);
-      this.heading = this.driving.heading;
-      this.updateCamera(dt, input, game.camera, true);
-      return;
-    }
-
-    const mouse = input.consumeMouse();
-    this.camYaw -= mouse.dx * 0.0032;
-    this.camPitch = clamp(this.camPitch + mouse.dy * 0.0026, -0.15, 0.85);
-    this.aiming = input.mouseDown;
-
-    const fwd = input.axis('KeyS', 'KeyW');
-    const strafe = input.axis('KeyA', 'KeyD');
-    const sprint = input.down('ShiftLeft') || input.down('ShiftRight');
-    const speed = sprint ? CONFIG.player.runSpeed : CONFIG.player.walkSpeed;
-    const moving = fwd !== 0 || strafe !== 0;
-
-    if (moving) {
-      const sin = Math.sin(this.camYaw);
-      const cos = Math.cos(this.camYaw);
-      // Camera-relative movement: W walks away from the camera.
-      let mx = sin * fwd + cos * strafe;
-      let mz = cos * fwd - sin * strafe;
-      const len = Math.hypot(mx, mz) || 1;
-      mx /= len;
-      mz /= len;
-      const nx = this.pos.x + mx * speed * dt;
-      const nz = this.pos.z + mz * speed * dt;
-      const fixed = game.city.collide(nx, nz, 0.7);
-      this.pos.x = clamp(fixed.x, -445, 445);
-      this.pos.z = clamp(fixed.z, -445, 445);
-      this.heading = damp(this.heading, Math.atan2(mx, mz), 12, dt);
-      this.walkPhase += dt * speed * 1.9;
-      const swing = Math.sin(this.walkPhase) * 0.6;
-      this.mesh.userData.legL.rotation.x = swing;
-      this.mesh.userData.legR.rotation.x = -swing;
-      this.mesh.userData.armL.rotation.x = -swing * 0.7;
-      this.mesh.userData.armR.rotation.x = swing * 0.7;
-    } else {
-      this.mesh.userData.legL.rotation.x = damp(this.mesh.userData.legL.rotation.x, 0, 10, dt);
-      this.mesh.userData.legR.rotation.x = damp(this.mesh.userData.legR.rotation.x, 0, 10, dt);
-      this.mesh.userData.armL.rotation.x = damp(this.mesh.userData.armL.rotation.x, this.aiming ? -1.2 : 0, 10, dt);
-      this.mesh.userData.armR.rotation.x = damp(this.mesh.userData.armR.rotation.x, this.aiming ? -1.2 : 0, 10, dt);
-    }
-
-    // Jump.
-    if (input.down('Space') && this.onGround) {
-      this.vy = 7.5;
-      this.onGround = false;
-    }
-    if (!this.onGround) {
-      this.vy -= 22 * dt;
-      this.pos.y += this.vy * dt;
-      if (this.pos.y <= 0) {
-        this.pos.y = 0;
-        this.vy = 0;
-        this.onGround = true;
+  // E: enter / exit car
+  if (consumeEnter()) {
+    if (p.onFoot) {
+      const c = nearestCar(state, p.x, p.y, 56);
+      if (c) {
+        p.onFoot = false;
+        p.car = c;
+        c.driver = "player";
+        c.stolen = true;
+        if (c.parked) {
+          c.parked = false;
+          state.events.push({ type: "stolen", x: c.x, y: c.y });
+        }
       }
+    } else if (p.car) {
+      const c = p.car;
+      c.driver = null;
+      c.speed = 0;
+      // step out to the side of the car
+      const side = Math.PI / 2;
+      p.x = c.x + Math.cos(c.angle + side) * 34;
+      p.y = c.y + Math.sin(c.angle + side) * 34;
+      p.angle = c.angle;
+      p.onFoot = true;
+      p.car = null;
+      collideCircle(state.city, p, PLAYER.radius);
     }
-
-    this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z);
-    this.mesh.rotation.y = this.heading;
-    this.updateCamera(dt, input, game.camera, false);
-    game.audio.setEngine(0, false);
   }
 
-  updateCamera(dt, input, camera, driving) {
-    if (driving) {
-      // Chase camera: behind the car, easing into place, looking ahead of it.
-      const back = this.heading + Math.PI;
-      const tx = this.pos.x + Math.sin(back) * this.camDist;
-      const tz = this.pos.z + Math.cos(back) * this.camDist;
-      const ty = 5.4;
-      camera.position.x = damp(camera.position.x, tx, 5, dt);
-      camera.position.y = damp(camera.position.y, ty, 5, dt);
-      camera.position.z = damp(camera.position.z, tz, 5, dt);
-      camera.lookAt(
-        this.pos.x + Math.sin(this.heading) * 7,
-        1.6,
-        this.pos.z + Math.cos(this.heading) * 7
-      );
-      return;
+  if (p.onFoot) {
+    let mx = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+    let my = (keys.down ? 1 : 0) - (keys.up ? 1 : 0);
+    const len = Math.hypot(mx, my);
+    if (len > 0) {
+      mx /= len; my /= len;
+      const sp = keys.run ? PLAYER.runSpeed : PLAYER.walkSpeed;
+      p.x += mx * sp * dt;
+      p.y += my * sp * dt;
+      p.angle = Math.atan2(my, mx);
+      collideCircle(state.city, p, PLAYER.radius);
     }
-    const cx = this.pos.x - Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cz = this.pos.z - Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-    const cy = this.pos.y + 2.0 + Math.sin(this.camPitch) * this.camDist;
-    // Keep the camera out of buildings: clamp to a simple height floor.
-    camera.position.set(cx, Math.max(cy, 1.2), cz);
-    camera.lookAt(this.pos.x, this.pos.y + 1.7, this.pos.z);
+    // aim toward the mouse
+    if (mouse.wx !== undefined) {
+      p.angle = Math.atan2(mouse.wy - p.y, mouse.wx - p.x);
+    }
+  } else if (p.car) {
+    // riding in a car: the player sits where the car is
+    p.x = p.car.x;
+    p.y = p.car.y;
+    p.angle = p.car.angle;
   }
+  // (driving is handled by vehicles.js — the car moves, the player rides along)
+  p.x = clamp(p.x, 0, state.cityWorld.w);
+  p.y = clamp(p.y, 0, state.cityWorld.h);
+}
 
-  // Where a shot fired from the crosshair goes.
-  aimDirection(camera) {
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    return dir;
-  }
-
-  muzzlePosition() {
-    return new THREE.Vector3(
-      this.pos.x + Math.sin(this.heading) * 0.6,
-      this.pos.y + 1.45,
-      this.pos.z + Math.cos(this.heading) * 0.6
-    );
-  }
+export function drawPlayer(ctx, p, cam) {
+  if (!p.onFoot || p.dead) return;
+  const sx = p.x - cam.x, sy = p.y - cam.y;
+  if (p.hurtTimer > 0 && Math.floor(p.hurtTimer * 12) % 2 === 0) return; // hurt flash
+  ctx.save();
+  ctx.translate(sx, sy);
+  // shadow
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath(); ctx.ellipse(2, 4, 14, 10, 0, 0, Math.PI * 2); ctx.fill();
+  // body
+  ctx.rotate(p.angle);
+  ctx.fillStyle = "#f2c14e"; // Rico's yellow jacket
+  ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#222831";
+  ctx.fillRect(8, -4, 10, 8); // gun / arm toward aim
+  ctx.fillStyle = "#f2c14e";
+  ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#8a5a2a";
+  ctx.beginPath(); ctx.arc(-2, 0, 5, 0, Math.PI * 2); ctx.fill(); // head
+  ctx.restore();
 }

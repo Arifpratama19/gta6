@@ -1,77 +1,50 @@
-// Keyboard + mouse state. Pointer lock is requested on canvas click while
-// playing; mouse movement steers the third-person camera.
+// input.js — keyboard + mouse state, polled once per frame.
+export const keys = Object.create(null);
+export const mouse = { x: 0, y: 0, down: false, clicked: false, wx: 0, wy: 0 };
 
-export class Input {
-  constructor() {
-    this.keys = new Set();
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.mouseDown = false;
-    this.mouseClicked = false;
-    this.locked = false;
-    this.onFirstGesture = null;
-    this.onPauseKey = null;
-    this.onMuteKey = null;
-    this.onRadioKey = null;
-  }
+const KEYMAP = {
+  KeyW: "up", ArrowUp: "up",
+  KeyS: "down", ArrowDown: "down",
+  KeyA: "left", ArrowLeft: "left",
+  KeyD: "right", ArrowRight: "right",
+  ShiftLeft: "run", ShiftRight: "run",
+  KeyE: "enter",
+  KeyM: "mute",
+  KeyP: "pause", Escape: "pause",
+  Space: "brake",
+};
 
-  attach(canvas) {
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      if (e.code === 'Escape' || e.code === 'KeyP') {
-        if (this.onPauseKey) this.onPauseKey();
-      }
-      if (e.code === 'KeyM' && this.onMuteKey) this.onMuteKey();
-      if (e.code === 'KeyR' && this.onRadioKey) this.onRadioKey();
-      if (this.onFirstGesture) this.onFirstGesture();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
-    document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === canvas) {
-        this.mouseDX += e.movementX || 0;
-        this.mouseDY += e.movementY || 0;
-      }
-    });
-    document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === canvas;
-    });
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        this.mouseDown = true;
-        this.mouseClicked = true;
-        if (this.onFirstGesture) this.onFirstGesture();
-        if (document.pointerLockElement !== canvas) {
-          canvas.requestPointerLock?.();
-        }
-      }
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
-    });
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  }
-
-  down(code) {
-    return this.keys.has(code);
-  }
-
-  axis(neg, pos) {
-    return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0);
-  }
-
-  consumeMouse() {
-    const dx = this.mouseDX;
-    const dy = this.mouseDY;
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    return { dx, dy };
-  }
-
-  consumeClick() {
-    const c = this.mouseClicked;
-    this.mouseClicked = false;
-    return c;
-  }
+export function initInput(canvas) {
+  window.addEventListener("keydown", (e) => {
+    const a = KEYMAP[e.code];
+    if (a) { keys[a] = true; if (a === "up" || a === "down" || a === "left" || a === "right" || a === "brake") e.preventDefault(); }
+    if (e.code === "KeyE") keys._enterPressed = true;
+    if (e.code === "KeyM") keys._mutePressed = true;
+    if (e.code === "KeyP" || e.code === "Escape") keys._pausePressed = true;
+  });
+  window.addEventListener("keyup", (e) => {
+    const a = KEYMAP[e.code];
+    if (a) keys[a] = false;
+  });
+  canvas.addEventListener("mousemove", (e) => {
+    const r = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - r.left;
+    mouse.y = e.clientY - r.top;
+  });
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 0) { mouse.down = true; mouse.clicked = true; }
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (e.button === 0) mouse.down = false;
+  });
+  window.addEventListener("blur", () => {
+    for (const k in keys) keys[k] = false;
+    mouse.down = false;
+  });
 }
+
+// edge-triggered helpers: call once per frame, then clear at frame end
+export function consumeEnter() { const v = !!keys._enterPressed; keys._enterPressed = false; return v; }
+export function consumeMute() { const v = !!keys._mutePressed; keys._mutePressed = false; return v; }
+export function consumePause() { const v = !!keys._pausePressed; keys._pausePressed = false; return v; }
+export function consumeClick() { const v = mouse.clicked; mouse.clicked = false; return v; }

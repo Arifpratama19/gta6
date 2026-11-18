@@ -1,190 +1,140 @@
-// Missions: Rico's five jobs for Mara Solis. A small step engine drives each
-// job — reach a marker, steal a car, pick something up, defeat a set number
-// of shooters — and pays out on completion.
+// missions.js — Rico Vega's 5-mission story chain.
+import { MISSIONS } from "./config.js";
+import { LANDMARKS } from "./city.js";
+import { createCar } from "./vehicles.js";
+import { createEnemy } from "./combat.js";
+import { addWanted } from "./police.js";
+import { dist } from "./util.js";
+import { sfxMission, sfxPickup } from "./audio.js";
 
-import * as THREE from 'three';
-import { MISSIONS } from './config.js';
-import { dist2 } from './util.js';
+export function createMissionState() {
+  return {
+    index: 0,            // 0..4 active, 5 = story complete
+    phase: "go",
+    target: null,        // {x, y, label}
+    data: {},            // per-mission scratch (timers, target car, kills left)
+    banner: null,        // {text, sub, t} shown by the HUD
+    completeTimer: 0,    // delay before the next mission starts
+  };
+}
 
-export class Missions {
-  constructor(scene, game) {
-    this.scene = scene;
-    this.game = game;
-    this.index = 0;
-    this.stepIndex = 0;
-    this.completed = 0;
-    this.done = false;
-    this.killsNeeded = 0;
-    this.killsDone = 0;
-    this.pickupTaken = false;
-    this.marker = null;
-    this.beacon = null;
-    this.beaconLight = null;
-    this.buildMarker();
+function showBanner(state, text, sub) {
+  state.mission.banner = { text, sub: sub || "", t: 3.2 };
+}
+
+export function startMission(state, i) {
+  const m = state.mission;
+  m.index = i;
+  m.phase = "go";
+  m.data = {};
+  const def = MISSIONS[i];
+  if (!def) { m.target = null; return; }
+  showBanner(state, "MISSION: " + def.title, def.brief);
+  if (i === 0) {
+    m.target = { x: LANDMARKS.marina.x, y: LANDMARKS.marina.y, label: "Meet your contact" };
+  } else if (i === 1) {
+    // the red coupe parked by the Pier
+    const car = createCar(LANDMARKS.pier.x - 60, LANDMARKS.pier.y + 30, Math.PI / 2, { color: "#d43d2a", parked: true });
+    state.cars.push(car);
+    m.data.targetCar = car;
+    m.target = { x: car.x, y: car.y, label: "Steal the red coupe" };
+  } else if (i === 2) {
+    const spots = [
+      { x: 2240, y: 600 }, { x: 2290, y: 760 }, { x: 2220, y: 1020 }, { x: 2300, y: 1180 },
+    ];
+    m.data.enemies = spots.map(s => { const e = createEnemy(s.x, s.y); state.enemies.push(e); return e; });
+    m.data.killsLeft = 4;
+    m.target = { x: 2260, y: 880, label: "Clear the beach" };
+  } else if (i === 3) {
+    addWanted(state, 3, state.player.x, state.player.y);
+    m.phase = "evade";
+    m.target = { x: state.player.x, y: state.player.y, label: "Lose the cops" };
+    showBanner(state, "MISSION: " + def.title, "3 stars on you. Break line of sight and stay clean until the heat dies down.");
+  } else if (i === 4) {
+    m.target = { x: LANDMARKS.bank.x, y: LANDMARKS.bank.y, label: "Hit the Solmar Bank" };
+    m.data.hold = 0;
   }
+}
 
-  buildMarker() {
-    const geo = new THREE.CylinderGeometry(2.2, 2.2, 0.5, 24);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffc300, transparent: true, opacity: 0.75 });
-    this.marker = new THREE.Mesh(geo, mat);
-    this.marker.position.y = 0.3;
-    this.marker.visible = false;
-    this.scene.add(this.marker);
-    const beamGeo = new THREE.CylinderGeometry(1.1, 1.1, 60, 12, 1, true);
-    const beamMat = new THREE.MeshBasicMaterial({
-      color: 0xffc300, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false,
-    });
-    this.beacon = new THREE.Mesh(beamGeo, beamMat);
-    this.beacon.position.y = 30;
-    this.beacon.visible = false;
-    this.scene.add(this.beacon);
-    this.beaconLight = new THREE.PointLight(0xffc300, 12, 30);
-    this.beaconLight.position.y = 4;
-    this.beaconLight.visible = false;
-    this.scene.add(this.beaconLight);
-  }
+function completeMission(state) {
+  const m = state.mission;
+  const def = MISSIONS[m.index];
+  state.player.money += def.pay;
+  sfxMission();
+  showBanner(state, "MISSION COMPLETE", def.title + "  —  +$" + def.pay);
+  state.events.push({ type: "missionDone", mission: m.index + 1 });
+  m.completeTimer = 3.5;
+  m.phase = "done";
+  m.target = null;
+}
 
-  current() {
-    return MISSIONS[this.index] || null;
-  }
-
-  currentStep() {
-    const m = this.current();
-    return m ? m.steps[this.stepIndex] : null;
-  }
-
-  objectiveText() {
-    if (this.done) return 'Story complete — Solmar Bay is yours, Rico.';
-    const m = this.current();
-    if (!m) return '';
-    const step = this.currentStep();
-    let text = step ? step.text : '';
-    if (step && step.type === 'eliminate') {
-      text = `Defeat the Coral Kings shooters (${this.killsDone}/${this.killsNeeded})`;
-    }
-    return `${m.title} — ${text}`;
-  }
-
-  start(index) {
-    this.index = index;
-    this.stepIndex = 0;
-    this.done = false;
-    this.killsDone = 0;
-    this.pickupTaken = false;
-    const m = this.current();
-    if (!m) {
-      this.done = true;
-      return;
-    }
-    if (m.heat) this.game.police.setWanted(m.heat);
-    this.game.hud.message(`${m.title}: ${m.brief}`);
-    this.game.audio.pickup();
-    this.syncMarker();
-  }
-
-  syncMarker() {
-    const step = this.currentStep();
-    if (!step || step.type === 'enterCar') {
-      this.marker.visible = false;
-      this.beacon.visible = false;
-      this.beaconLight.visible = false;
-      return;
-    }
-    if (step.x !== undefined) {
-      this.marker.position.set(step.x, 0.3, step.z);
-      this.beacon.position.set(step.x, 30, step.z);
-      this.beaconLight.position.set(step.x, 4, step.z);
-      this.marker.visible = true;
-      this.beacon.visible = true;
-      this.beaconLight.visible = true;
-    }
-  }
-
-  onEnemyKilled() {
-    const step = this.currentStep();
-    if (!step || step.type !== 'eliminate') return;
-    this.killsDone++;
-    if (this.killsDone >= this.killsNeeded) this.advance();
-    else this.game.hud.message(`Shooters left: ${this.killsNeeded - this.killsDone}`);
-  }
-
-  advance() {
-    const m = this.current();
-    if (!m) return;
-    this.stepIndex++;
-    if (this.stepIndex >= m.steps.length) {
-      this.completeMission(m);
-      return;
-    }
-    const step = this.currentStep();
-    if (step.type === 'eliminate') {
-      this.killsNeeded = step.count;
-      this.killsDone = 0;
-      const cx = step.x;
-      const cz = step.z;
-      for (let i = 0; i < step.count; i++) {
-        this.game.combat.spawnEnemy(cx + (Math.random() - 0.5) * 36, cz + (Math.random() - 0.5) * 36);
+export function updateMissions(state, dt) {
+  const m = state.mission;
+  const p = state.player;
+  if (m.banner) { m.banner.t -= dt; if (m.banner.t <= 0) m.banner = null; }
+  if (m.index >= MISSIONS.length) return; // story done
+  if (m.phase === "done") {
+    m.completeTimer -= dt;
+    if (m.completeTimer <= 0) {
+      const next = m.index + 1;
+      if (next >= MISSIONS.length) {
+        m.index = next;
+        showBanner(state, "SOLMAR BAY — STORY COMPLETE", "Rico Vega owns this town now. Free roam: keep driving, keep the heat low.");
+        state.events.push({ type: "storyDone" });
+      } else {
+        startMission(state, next);
       }
-      this.game.hud.message('Coral Kings shooters on the pier — take them down!');
     }
-    this.syncMarker();
+    return;
   }
-
-  completeMission(m) {
-    this.game.cash += m.reward;
-    this.completed++;
-    this.game.audio.cash();
-    this.game.hud.message(`Mission complete: ${m.title} — +$${m.reward.toLocaleString('en-US')}`);
-    this.game.combat.clearEnemies();
-    if (this.index + 1 >= MISSIONS.length) {
-      this.done = true;
-      this.marker.visible = false;
-      this.beacon.visible = false;
-      this.beaconLight.visible = false;
-      this.game.hud.showBanner('STORY COMPLETE', 'The debt is paid. Solmar Bay is yours, Rico.');
-      this.game.saveGame();
-      return;
-    }
-    this.index++;
-    this.stepIndex = 0;
-    this.killsDone = 0;
-    this.pickupTaken = false;
-    const next = this.current();
-    if (next.heat) this.game.police.setWanted(next.heat);
-    this.game.hud.message(`${next.title}: ${next.brief}`);
-    this.syncMarker();
-    this.game.saveGame();
+  // count mission-3 kills
+  if (m.index === 2 && m.data.enemies) {
+    m.data.killsLeft = m.data.enemies.filter(e => !e.dead).length;
+    if (m.data.killsLeft <= 0) { completeMission(state); return; }
   }
-
-  update(dt) {
-    if (this.done || this.game.state !== 'playing') return;
-    const m = this.current();
-    if (!m) return;
-    const step = this.currentStep();
-    if (!step) return;
-    const p = this.game.player.pos;
-    // Marker pulse.
-    if (this.marker.visible) {
-      const s = 1 + Math.sin(this.game.time * 4) * 0.12;
-      this.marker.scale.set(s, 1, s);
-      this.marker.rotation.y += dt;
+  const t = m.target;
+  if (!t) return;
+  const d = dist(p.x, p.y, t.x, t.y);
+  if (m.index === 0) {
+    if (d < 70) completeMission(state);
+  } else if (m.index === 1) {
+    if (m.phase === "go") {
+      if (!p.onFoot && p.car === m.data.targetCar) {
+        m.phase = "deliver";
+        m.target = { x: LANDMARKS.garage.x, y: LANDMARKS.garage.y, label: "Deliver to the garage" };
+        showBanner(state, "Nice wheels.", "Now get it to the garage — in one piece.");
+      }
+    } else if (m.phase === "deliver") {
+      if (!p.onFoot && p.car === m.data.targetCar && d < 80) completeMission(state);
     }
-    if (step.type === 'enterCar') {
-      if (this.game.player.driving) this.advance();
-    } else if (step.type === 'reach' || step.type === 'pickup') {
-      if (dist2(p.x, p.z, step.x, step.z) < step.radius) {
-        if (step.type === 'pickup') {
-          if (!this.pickupTaken) {
-            this.pickupTaken = true;
-            this.game.audio.pickup();
-            this.game.hud.message('Package secured. Now deliver it.');
-            this.advance();
-          }
-        } else {
-          this.game.audio.pickup();
-          this.advance();
+  } else if (m.index === 2) {
+    // kills drive this mission; the marker is just a guide
+  } else if (m.index === 3) {
+    if (m.phase === "evade") {
+      if (state.wanted === 0) {
+        m.phase = "go";
+        m.target = { x: LANDMARKS.safehouse.x, y: LANDMARKS.safehouse.y, label: "Reach the safehouse" };
+        showBanner(state, "Heat's off.", "Now slip away to the safehouse up north.");
+      }
+    } else if (m.phase === "go") {
+      if (d < 70) completeMission(state);
+    }
+  } else if (m.index === 4) {
+    if (m.phase === "go") {
+      if (p.onFoot && d < 60) {
+        m.data.hold += dt;
+        if (m.data.hold >= 5) {
+          m.phase = "escape";
+          m.target = { x: LANDMARKS.marina.x, y: LANDMARKS.marina.y, label: "Escape to the marina" };
+          addWanted(state, 4, p.x, p.y);
+          sfxPickup();
+          showBanner(state, "Cash grabbed!", "4 stars. Lose them and get to the marina — now!");
         }
+      } else {
+        m.data.hold = Math.max(0, m.data.hold - dt * 2);
       }
+    } else if (m.phase === "escape") {
+      if (d < 70) completeMission(state);
     }
   }
 }
