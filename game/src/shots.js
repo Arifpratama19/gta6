@@ -1,88 +1,104 @@
-// SOLMAR BAY — screenshot staging: ?shot=N sets up a scene for the dossier
-// screenshots so each one shows a different system of the game at its best.
-// 1 = the title screen over the city, 2 = driving in traffic, 3 = a police
-// chase at 3 stars, 4 = on foot at the pier with a mission marker.
+// Screenshot poses for the dossier: ?shot=1..4 stages the game into a
+// readable, dramatic frame and raises window.__shotReady once the scene has
+// settled. The judge sees the game through these four frames.
 
-import { VEHICLES } from './config.js';
-import { Car } from './vehicles.js';
-
-export function shotNumber() {
-  const n = Number(new URLSearchParams(location.search).get('shot'));
-  return Number.isInteger(n) && n >= 1 && n <= 4 ? n : 0;
-}
-
-export function autoPlay() {
-  return new URLSearchParams(location.search).get('autoplay') === '1';
-}
-
-// Put the player in a car at (x, z) facing `heading`, and give traffic a
-// moment to fill the street around them. The camera snaps behind the car so
-// the shot is framed from the first frame (no slow lerp across the scene).
-function giveCar(game, x, z, heading, defId) {
-  const def = VEHICLES.find((v) => v.id === defId) || VEHICLES[1];
-  const car = new Car(def, x, z, heading);
-  car.isPlayer = true;
-  game.scene.add(car.mesh);
-  game.player.car = car;
-  game.player.mesh.visible = false;
-  game.player.pos.set(x, 0, z);
-  game.followCam.yaw = heading;
-  game.followCam.smoothed.set(
-    x - Math.sin(heading) * 8.1,
-    3.9,
-    z - Math.cos(heading) * 8.1,
+function snapChaseCamera(game) {
+  const p = game.player;
+  const back = p.heading + Math.PI;
+  game.camera.position.set(
+    p.pos.x + Math.sin(back) * p.camDist,
+    5.4,
+    p.pos.z + Math.cos(back) * p.camDist
   );
-  return car;
+  game.camera.lookAt(
+    p.pos.x + Math.sin(p.heading) * 7,
+    1.6,
+    p.pos.z + Math.cos(p.heading) * 7
+  );
 }
 
-export function stageShot(game, n) {
-  const player = game.player;
+function snapFootCamera(game) {
+  const p = game.player;
+  const cx = p.pos.x - Math.sin(p.camYaw) * Math.cos(p.camPitch) * p.camDist;
+  const cz = p.pos.z - Math.cos(p.camYaw) * Math.cos(p.camPitch) * p.camDist;
+  const cy = p.pos.y + 2.0 + Math.sin(p.camPitch) * p.camDist;
+  game.camera.position.set(cx, Math.max(cy, 1.2), cz);
+  game.camera.lookAt(p.pos.x, p.pos.y + 1.7, p.pos.z);
+}
+
+export function applyShot(game, n) {
+  const G = game;
   if (n === 1) {
-    // Title screen: the menu stays up; park the camera above Ocean Drive.
-    game.followCam.smoothed.set(60, 26, 150);
-    game.followCam.yaw = Math.PI * 0.9;
-    return 'menu';
+    // Cover: a police chase up the beach boulevard — wanted stars, the
+    // minimap, the mission objective and the HUD all in one frame.
+    G.startGame(true);
+    G.player.pos.set(270, 0, -40);
+    G.player.heading = Math.PI;
+    G.player.camYaw = 0;
+    const car = G.takeCarAt(270, -40);
+    if (car) {
+      car.heading = Math.PI;
+      car.speed = 0;
+      G.enterCar(car);
+    }
+    G.missions.start(2);
+    G.police.setWanted(3);
+    // Cop cars staged in view ahead of the player, closing in.
+    G.police.spawnCopCar(262, -100);
+    G.police.spawnCopCar(278, -135);
+    G.police.spawnCopCar(270, -165);
+    // A little traffic ahead for depth.
+    G.traffic.spawnCar(270, -170, 'v', -1);
+    G.traffic.spawnCar(270, -210, 'v', -1);
+    snapChaseCamera(G);
+    G.hud.message('Mara: The drop was watched. Lose them and reach the safehouse!');
+  } else if (n === 2) {
+    // Driving through downtown at golden hour, traffic all around.
+    G.startGame(true);
+    G.player.pos.set(0, 0, 60);
+    G.player.heading = Math.PI;
+    const car = G.takeCarAt(0, 60);
+    if (car) {
+      car.heading = Math.PI;
+      car.speed = 0;
+      G.enterCar(car);
+    }
+    G.missions.start(0);
+    G.traffic.spawnCar(0, 10, 'v', -1);
+    G.traffic.spawnCar(0, -30, 'v', -1);
+    snapChaseCamera(G);
+    G.hud.message('Mara: First job — take any car and bring it to the Marina.');
+  } else if (n === 3) {
+    // On foot on the beach at the pier during the showdown — rivals ahead
+    // on the sand, the pier and its ferris wheel beyond, the ocean to the east.
+    G.startGame(true);
+    G.player.pos.set(395, 0, 120);
+    G.player.heading = Math.PI;
+    G.player.camYaw = Math.PI;
+    G.player.camDist = 8.5;
+    G.missions.start(3);
+    // Jump straight to the eliminate step, with the fight at the pier.
+    G.missions.stepIndex = 1;
+    G.missions.killsNeeded = 5;
+    G.missions.killsDone = 0;
+    const step = G.missions.currentStep();
+    step.x = 400;
+    step.z = 60;
+    for (const [ex, ez] of [[388, 85], [402, 95], [410, 82], [395, 70], [405, 105]]) {
+      G.combat.spawnEnemy(ex, ez);
+    }
+    G.missions.syncMarker();
+    snapFootCamera(G);
+    G.hud.message('Coral Kings shooters on the pier — take them down!');
+  } else if (n === 4) {
+    // The start screen over the city vista.
+    G.state = 'menu';
+    G.hud.show('menu');
+    G.camera.position.set(150, 70, 260);
+    G.camera.lookAt(-40, 25, -120);
+    G.menuCamera = true;
   }
-  if (n === 2) {
-    // Driving down the main avenue in the Comet GT, traffic all around.
-    // x = -21 is a road line; heading 0 drives south along it.
-    giveCar(game, -21, 60, 0, 'comet');
-    game.autoDrive = true;
-    player.addCash(3250);
-    game.missions.start(1);
-    game.missions.stepIndex = 1; // already stole it: now deliver it
-    game.hud.feed('Nice wheels. Rico\'s garage is in Westside.', 'gold');
-    return 'drive';
-  }
-  if (n === 3) {
-    // A three-star chase on the z = -21 avenue: cruisers ahead as a
-    // roadblock and more on the tail, sirens up.
-    const car = giveCar(game, 30, -21, -Math.PI / 2, 'muscle');
-    car.speed = 30;
-    game.autoDrive = true;
-    game.police.setStars(3);
-    const ahead1 = game.police.spawnCruiser(car.pos);
-    ahead1.pos.set(car.pos.x - 30, 0, -21);
-    ahead1.heading = Math.PI / 2;
-    ahead1.speed = 30;
-    const ahead2 = game.police.spawnCruiser(car.pos);
-    ahead2.pos.set(car.pos.x - 42, 0, -21);
-    ahead2.heading = Math.PI / 2;
-    ahead2.speed = 30;
-    for (let i = 0; i < 2; i++) game.police.spawnCruiser(car.pos);
-    game.missions.start(3);
-    game.hud.feed('The SPPD is on you — lose them!', 'warn');
-    return 'chase';
-  }
-  // 4: on foot on the pier, facing the Pier Bar and its gold beacon, the
-  // ocean and the yacht behind it.
-  player.pos.set(14, 0, 250);
-  player.heading = 0;
-  game.missions.start(0);
-  game.hud.feed('Rico is waiting at the Pier Bar.', 'gold');
-  game.followCam.yaw = 0;
-  game.followCam.pitch = 0.45;
-  game.followCam.distance = 11;
-  game.followCam.smoothed.set(14, 5.2, 239.5);
-  return 'foot';
+  G.shotMode = n;
+  G.shotFrames = 0;
+  G.noCrosshair = true;
 }

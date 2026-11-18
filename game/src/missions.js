@@ -1,159 +1,190 @@
-// SOLMAR BAY — the story: six jobs for Lucia Vega, each a chain of steps.
-// A step is a place to reach, a car to steal, a thing to hold, or the cops to
-// lose. The manager shows the marker, the beacon and the objective text, and
-// pays out when a job is done.
+// Missions: Rico's five jobs for Mara Solis. A small step engine drives each
+// job — reach a marker, steal a car, pick something up, defeat a set number
+// of shooters — and pays out on completion.
 
 import * as THREE from 'three';
 import { MISSIONS } from './config.js';
-import { clamp } from './util.js';
+import { dist2 } from './util.js';
 
 export class Missions {
-  constructor(scene) {
+  constructor(scene, game) {
     this.scene = scene;
-    this.index = 0;                 // which mission is active
+    this.game = game;
+    this.index = 0;
     this.stepIndex = 0;
-    this.holdTimer = 0;
-    this.active = false;
-    this.done = false;              // whole story complete
-    this.marker = null;             // { pos, radius, needCar }
-    this.beacon = this.buildBeacon();
+    this.completed = 0;
+    this.done = false;
+    this.killsNeeded = 0;
+    this.killsDone = 0;
+    this.pickupTaken = false;
+    this.marker = null;
+    this.beacon = null;
+    this.beaconLight = null;
+    this.buildMarker();
+  }
+
+  buildMarker() {
+    const geo = new THREE.CylinderGeometry(2.2, 2.2, 0.5, 24);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffc300, transparent: true, opacity: 0.75 });
+    this.marker = new THREE.Mesh(geo, mat);
+    this.marker.position.y = 0.3;
+    this.marker.visible = false;
+    this.scene.add(this.marker);
+    const beamGeo = new THREE.CylinderGeometry(1.1, 1.1, 60, 12, 1, true);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xffc300, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false,
+    });
+    this.beacon = new THREE.Mesh(beamGeo, beamMat);
+    this.beacon.position.y = 30;
     this.beacon.visible = false;
-    scene.add(this.beacon);
-    this.arrow = this.buildArrow();
-    this.arrow.visible = false;
-    scene.add(this.arrow);
+    this.scene.add(this.beacon);
+    this.beaconLight = new THREE.PointLight(0xffc300, 12, 30);
+    this.beaconLight.position.y = 4;
+    this.beaconLight.visible = false;
+    this.scene.add(this.beaconLight);
   }
 
-  buildBeacon() {
-    const g = new THREE.Group();
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.1, 1.1, 60, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
-    );
-    beam.position.y = 30;
-    g.add(beam);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(3.2, 0.28, 8, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffd23e }),
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.25;
-    g.add(ring);
-    return g;
+  current() {
+    return MISSIONS[this.index] || null;
   }
 
-  buildArrow() {
-    const arrow = new THREE.Mesh(
-      new THREE.ConeGeometry(0.9, 2.2, 4),
-      new THREE.MeshBasicMaterial({ color: 0xffd23e }),
-    );
-    arrow.rotation.x = Math.PI; // point down
-    return arrow;
+  currentStep() {
+    const m = this.current();
+    return m ? m.steps[this.stepIndex] : null;
   }
 
-  get current() { return this.active ? MISSIONS[this.index] : null; }
-  get step() { return this.current ? this.current.steps[this.stepIndex] : null; }
+  objectiveText() {
+    if (this.done) return 'Story complete — Solmar Bay is yours, Rico.';
+    const m = this.current();
+    if (!m) return '';
+    const step = this.currentStep();
+    let text = step ? step.text : '';
+    if (step && step.type === 'eliminate') {
+      text = `Defeat the Coral Kings shooters (${this.killsDone}/${this.killsNeeded})`;
+    }
+    return `${m.title} — ${text}`;
+  }
 
   start(index) {
-    this.index = clamp(index, 0, MISSIONS.length - 1);
+    this.index = index;
     this.stepIndex = 0;
-    this.holdTimer = 0;
-    this.active = true;
     this.done = false;
-    this.current._heatApplied = false;
-    return this.current;
-  }
-
-  startNext() {
-    if (this.index + 1 >= MISSIONS.length) {
-      this.active = false;
+    this.killsDone = 0;
+    this.pickupTaken = false;
+    const m = this.current();
+    if (!m) {
       this.done = true;
-      this.hideMarker();
-      return null;
+      return;
     }
-    return this.start(this.index + 1);
+    if (m.heat) this.game.police.setWanted(m.heat);
+    this.game.hud.message(`${m.title}: ${m.brief}`);
+    this.game.audio.pickup();
+    this.syncMarker();
   }
 
-  hideMarker() {
-    this.beacon.visible = false;
-    this.arrow.visible = false;
-    this.marker = null;
-  }
-
-  // The beacon follows the current step's position; steps without a place
-  // (steal a car, lose the cops) hide it.
-  updateMarker() {
-    const s = this.step;
-    if (!s || !s.pos) { this.hideMarker(); return; }
-    this.marker = { pos: new THREE.Vector3(s.pos[0], 0, s.pos[1]), radius: s.radius || 6, needCar: !!s.needCar };
-    this.beacon.position.set(s.pos[0], 0, s.pos[1]);
-    this.beacon.visible = true;
-    this.arrow.position.set(s.pos[0], 9 + Math.sin(performance.now() / 300) * 0.7, s.pos[1]);
-    this.arrow.visible = true;
-  }
-
-  // Advance the mission state for one frame. `events` carries what happened
-  // this frame (entered a car, grabbed cash). Returns a status string or null.
-  update(dt, playerPos, playerInCar, events) {
-    if (!this.active) return null;
-    const mission = this.current;
-    const step = this.step;
-    if (!step) return null;
-    this.updateMarker();
-
-    if (step.type === 'goto') {
-      const d = Math.hypot(playerPos.x - step.pos[0], playerPos.z - step.pos[1]);
-      if (d < (step.radius || 6) && (!step.needCar || playerInCar)) return this.advance();
+  syncMarker() {
+    const step = this.currentStep();
+    if (!step || step.type === 'enterCar') {
+      this.marker.visible = false;
+      this.beacon.visible = false;
+      this.beaconLight.visible = false;
+      return;
     }
-    if (step.type === 'enterCar' && events.enteredCar) return this.advance();
-    if (step.type === 'grab') {
-      const d = Math.hypot(playerPos.x - step.pos[0], playerPos.z - step.pos[1]);
-      if (d < (step.radius || 10)) {
-        this.holdTimer += dt;
-        if (this.holdTimer >= (step.hold || 10)) return this.advance();
-      } else {
-        this.holdTimer = Math.max(0, this.holdTimer - dt * 2);
+    if (step.x !== undefined) {
+      this.marker.position.set(step.x, 0.3, step.z);
+      this.beacon.position.set(step.x, 30, step.z);
+      this.beaconLight.position.set(step.x, 4, step.z);
+      this.marker.visible = true;
+      this.beacon.visible = true;
+      this.beaconLight.visible = true;
+    }
+  }
+
+  onEnemyKilled() {
+    const step = this.currentStep();
+    if (!step || step.type !== 'eliminate') return;
+    this.killsDone++;
+    if (this.killsDone >= this.killsNeeded) this.advance();
+    else this.game.hud.message(`Shooters left: ${this.killsNeeded - this.killsDone}`);
+  }
+
+  advance() {
+    const m = this.current();
+    if (!m) return;
+    this.stepIndex++;
+    if (this.stepIndex >= m.steps.length) {
+      this.completeMission(m);
+      return;
+    }
+    const step = this.currentStep();
+    if (step.type === 'eliminate') {
+      this.killsNeeded = step.count;
+      this.killsDone = 0;
+      const cx = step.x;
+      const cz = step.z;
+      for (let i = 0; i < step.count; i++) {
+        this.game.combat.spawnEnemy(cx + (Math.random() - 0.5) * 36, cz + (Math.random() - 0.5) * 36);
+      }
+      this.game.hud.message('Coral Kings shooters on the pier — take them down!');
+    }
+    this.syncMarker();
+  }
+
+  completeMission(m) {
+    this.game.cash += m.reward;
+    this.completed++;
+    this.game.audio.cash();
+    this.game.hud.message(`Mission complete: ${m.title} — +$${m.reward.toLocaleString('en-US')}`);
+    this.game.combat.clearEnemies();
+    if (this.index + 1 >= MISSIONS.length) {
+      this.done = true;
+      this.marker.visible = false;
+      this.beacon.visible = false;
+      this.beaconLight.visible = false;
+      this.game.hud.showBanner('STORY COMPLETE', 'The debt is paid. Solmar Bay is yours, Rico.');
+      this.game.saveGame();
+      return;
+    }
+    this.index++;
+    this.stepIndex = 0;
+    this.killsDone = 0;
+    this.pickupTaken = false;
+    const next = this.current();
+    if (next.heat) this.game.police.setWanted(next.heat);
+    this.game.hud.message(`${next.title}: ${next.brief}`);
+    this.syncMarker();
+    this.game.saveGame();
+  }
+
+  update(dt) {
+    if (this.done || this.game.state !== 'playing') return;
+    const m = this.current();
+    if (!m) return;
+    const step = this.currentStep();
+    if (!step) return;
+    const p = this.game.player.pos;
+    // Marker pulse.
+    if (this.marker.visible) {
+      const s = 1 + Math.sin(this.game.time * 4) * 0.12;
+      this.marker.scale.set(s, 1, s);
+      this.marker.rotation.y += dt;
+    }
+    if (step.type === 'enterCar') {
+      if (this.game.player.driving) this.advance();
+    } else if (step.type === 'reach' || step.type === 'pickup') {
+      if (dist2(p.x, p.z, step.x, step.z) < step.radius) {
+        if (step.type === 'pickup') {
+          if (!this.pickupTaken) {
+            this.pickupTaken = true;
+            this.game.audio.pickup();
+            this.game.hud.message('Package secured. Now deliver it.');
+            this.advance();
+          }
+        } else {
+          this.game.audio.pickup();
+          this.advance();
+        }
       }
     }
-    if (step.type === 'escape' && events.wanted === 0) return this.advance();
-    return null;
-  }
-
-  // Move to the next step; when the mission's steps are done, pay out and
-  // hand back the completed mission.
-  advance() {
-    const mission = this.current;
-    this.stepIndex++;
-    this.holdTimer = 0;
-    if (this.stepIndex >= mission.steps.length) {
-      this.active = false;
-      this.hideMarker();
-      return { completed: mission };
-    }
-    return { step: this.step };
-  }
-
-  // Objective text for the HUD, with hold progress when relevant.
-  objectiveText() {
-    if (!this.active) {
-      return this.done
-        ? { title: 'STORY COMPLETE', text: 'Solmar Bay is yours — free roam', sub: 'Press Esc to save. Explore, steal, cause chaos.' }
-        : { title: 'FREE ROAM', text: 'Explore Solmar Bay', sub: 'Start the next job from the pause menu, or just drive.' };
-    }
-    const mission = this.current;
-    const step = this.step;
-    let text = step ? step.text : '';
-    let sub = `Job ${this.index + 1} of ${MISSIONS.length}  •  Reward $${mission.reward}`;
-    if (step && step.type === 'grab') {
-      const pct = Math.round((this.holdTimer / (step.hold || 10)) * 100);
-      text = `${step.text} — ${pct}%`;
-    }
-    return { title: mission.title, text, sub };
-  }
-
-  // The mission's wanted level, applied when the job starts.
-  wantedOnStart() {
-    const m = this.current;
-    return m && m.wanted ? m.wanted : 0;
   }
 }

@@ -1,73 +1,77 @@
-// SOLMAR BAY — keyboard and mouse state. One place reads the devices; the
-// rest of the game asks this module what the player is doing right now.
+// Keyboard + mouse state. Pointer lock is requested on canvas click while
+// playing; mouse movement steers the third-person camera.
 
-const keys = new Set();
-// Edge-triggered presses: set on keydown, cleared when the game consumes
-// them, so a short press is never lost between slow frames.
-const edgePressed = new Set();
-let mouseDown = false;
-let mouseClicked = false;
-let dragDX = 0;
-let dragDY = 0;
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-let anyKeyPressed = false;
+export class Input {
+  constructor() {
+    this.keys = new Set();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.mouseDown = false;
+    this.mouseClicked = false;
+    this.locked = false;
+    this.onFirstGesture = null;
+    this.onPauseKey = null;
+    this.onMuteKey = null;
+    this.onRadioKey = null;
+  }
 
-const GAME_KEYS = [
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight',
-  'KeyE', 'KeyF', 'KeyR', 'KeyM', 'KeyH', 'Escape', 'ArrowUp', 'ArrowDown',
-  'ArrowLeft', 'ArrowRight',
-];
+  attach(canvas) {
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        if (this.onPauseKey) this.onPauseKey();
+      }
+      if (e.code === 'KeyM' && this.onMuteKey) this.onMuteKey();
+      if (e.code === 'KeyR' && this.onRadioKey) this.onRadioKey();
+      if (this.onFirstGesture) this.onFirstGesture();
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === canvas) {
+        this.mouseDX += e.movementX || 0;
+        this.mouseDY += e.movementY || 0;
+      }
+    });
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = document.pointerLockElement === canvas;
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.mouseClicked = true;
+        if (this.onFirstGesture) this.onFirstGesture();
+        if (document.pointerLockElement !== canvas) {
+          canvas.requestPointerLock?.();
+        }
+      }
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseDown = false;
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
 
-export function initInput(canvas) {
-  window.addEventListener('keydown', (e) => {
-    if (GAME_KEYS.includes(e.code)) e.preventDefault();
-    if (!e.repeat) { anyKeyPressed = true; edgePressed.add(e.code); }
-    keys.add(e.code);
-  });
-  window.addEventListener('keyup', (e) => keys.delete(e.code));
-  window.addEventListener('blur', () => keys.clear());
+  down(code) {
+    return this.keys.has(code);
+  }
 
-  canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 0) {
-      mouseDown = true; mouseClicked = true;
-      dragging = true; lastX = e.clientX; lastY = e.clientY;
-    }
-  });
-  window.addEventListener('mouseup', () => { mouseDown = false; dragging = false; });
-  window.addEventListener('mousemove', (e) => {
-    if (!dragging) return;
-    dragDX += e.clientX - lastX;
-    dragDY += e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
-  });
-  // Losing the pointer mid-drag must not leave a stale delta behind.
-  canvas.addEventListener('mouseleave', () => { dragging = false; });
-}
+  axis(neg, pos) {
+    return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0);
+  }
 
-export function isDown(code) { return keys.has(code); }
-export function moveForward() { return keys.has('KeyW') || keys.has('ArrowUp'); }
-export function moveBack() { return keys.has('KeyS') || keys.has('ArrowDown'); }
-export function moveLeft() { return keys.has('KeyA') || keys.has('ArrowLeft'); }
-export function moveRight() { return keys.has('KeyD') || keys.has('ArrowRight'); }
-export function sprinting() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); }
-export function jumping() { return keys.has('Space'); }
+  consumeMouse() {
+    const dx = this.mouseDX;
+    const dy = this.mouseDY;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    return { dx, dy };
+  }
 
-// Edge-triggered actions: true once per press, then consumed by the caller.
-export function wasPressed(code) {
-  if (edgePressed.has(code)) { edgePressed.delete(code); return true; }
-  return false;
-}
-export function consumeClick() {
-  const c = mouseClicked; mouseClicked = false; return c;
-}
-export function isMouseDown() { return mouseDown; }
-export function consumeDrag() {
-  const d = { x: dragDX, y: dragDY };
-  dragDX = 0; dragDY = 0;
-  return d;
-}
-export function consumeAnyKey() {
-  const k = anyKeyPressed; anyKeyPressed = false; return k;
+  consumeClick() {
+    const c = this.mouseClicked;
+    this.mouseClicked = false;
+    return c;
+  }
 }

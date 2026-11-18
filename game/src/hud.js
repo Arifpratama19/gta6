@@ -1,197 +1,163 @@
-// SOLMAR BAY — the HUD: cash, stars, health, speed, the mission objective,
-// the message feed, and the circular minimap drawn on a 2D canvas from the
-// same city data the 3D world uses.
+// HUD: cash, health, wanted stars, mission objective, speed, the message
+// feed, the live minimap, and the start / pause / game-over screens.
 
-import { WORLD, PITCH, roadLines, districtAt } from './config.js';
-import { clamp } from './util.js';
+import { CONFIG, CONTROLS, STORY } from './config.js';
+import { clockString, money } from './util.js';
 
-export class Hud {
-  constructor() {
-    this.el = {
-      hud: document.getElementById('hud'),
-      cash: document.getElementById('cash-value'),
-      stars: document.getElementById('stars'),
-      clock: document.getElementById('clock'),
-      district: document.getElementById('district'),
-      healthFill: document.getElementById('health-fill'),
-      armorFill: document.getElementById('armor-fill'),
-      speed: document.getElementById('speed'),
-      carName: document.getElementById('car-name'),
-      weapon: document.getElementById('weapon'),
-      missionTitle: document.getElementById('mission-title'),
-      missionText: document.getElementById('mission-text'),
-      missionSub: document.getElementById('mission-sub'),
-      feed: document.getElementById('feed'),
-      banner: document.getElementById('banner'),
-      bannerTitle: document.getElementById('banner-title'),
-      bannerSub: document.getElementById('banner-sub'),
-      hint: document.getElementById('hint'),
-      crosshair: document.getElementById('crosshair'),
-      damage: document.getElementById('damage'),
-      flash: document.getElementById('wanted-flash'),
-    };
-    this.map = document.getElementById('minimap');
-    this.mapCtx = this.map.getContext('2d');
+export class HUD {
+  constructor(game) {
+    this.game = game;
+    this.el = (id) => document.getElementById(id);
+    this.mapCtx = this.el('minimap').getContext('2d');
+    this.messages = [];
     this.bannerTimer = 0;
-    this.feedLines = [];
-    this.gameMinutes = 12 * 60; // the clock starts at noon
+    this.wantedFlash = 0;
+    this.buildMenu();
   }
 
-  show() { this.el.hud.classList.remove('hidden'); }
-  hide() { this.el.hud.classList.add('hidden'); }
-
-  setCash(v) { this.el.cash.textContent = v.toLocaleString('en-US'); }
-
-  setStars(n) {
-    const el = this.el.stars;
-    let html = '';
-    for (let i = 0; i < 5; i++) html += `<span class="${i < n ? 'lit' : ''}">★</span>`;
-    el.innerHTML = html;
-    el.classList.toggle('hot', n >= 3);
+  buildMenu() {
+    const controlsHtml = CONTROLS.map(([k, v]) => `<div class="ctl"><b>${k}</b><span>${v}</span></div>`).join('');
+    this.el('menu-body').innerHTML = `
+      <p class="tagline">${STORY.intro}</p>
+      <div class="controls">${controlsHtml}</div>
+      <p class="hint">Steal cars, run missions for Mara Solis, dodge the Solmar Bay PD — and don't let the Coral Kings catch you slipping.</p>`;
   }
 
-  setHealth(h, armor) {
-    this.el.healthFill.style.width = `${clamp(h, 0, 100)}%`;
-    this.el.healthFill.classList.toggle('low', h < 30);
-    this.el.armorFill.style.width = `${clamp(armor, 0, 100)}%`;
-  }
-
-  setSpeed(mph, carName) {
-    this.el.speed.innerHTML = `${Math.round(mph)} <small>MPH</small>`;
-    this.el.carName.textContent = carName || '';
-  }
-
-  setObjective(o) {
-    this.el.missionTitle.textContent = o.title;
-    this.el.missionText.textContent = o.text;
-    this.el.missionSub.textContent = o.sub || '';
-  }
-
-  setCrosshair(on) { this.el.crosshair.classList.toggle('hidden', !on); }
-
-  setHint(text) { this.el.hint.textContent = text; }
-
-  setDamage(amount) {
-    this.el.damage.style.opacity = clamp(amount, 0, 1).toFixed(2);
-  }
-
-  setSirenFlash(on, phase) {
-    this.el.flash.style.opacity = on ? (0.25 + 0.2 * Math.sin(phase * 6)) : 0;
-  }
-
-  showBanner(title, sub, seconds = 3) {
-    this.el.bannerTitle.textContent = title;
-    this.el.bannerSub.textContent = sub || '';
-    this.el.banner.classList.add('show');
-    this.bannerTimer = seconds;
-  }
-
-  feed(text, kind = '') {
-    const line = document.createElement('div');
-    line.className = `feed-line ${kind}`;
-    line.textContent = text;
-    this.el.feed.appendChild(line);
-    this.feedLines.push(line);
-    while (this.feedLines.length > 4) {
-      const old = this.feedLines.shift();
-      old.remove();
+  show(screen) {
+    for (const id of ['menu', 'pause', 'over']) {
+      this.el(id).classList.toggle('hidden', id !== screen);
     }
-    setTimeout(() => { line.style.opacity = '0'; line.style.transition = 'opacity .6s'; }, 4200);
-    setTimeout(() => { line.remove(); }, 4900);
+    this.el('hud').classList.toggle('hidden', screen === 'menu');
+    this.el('crosshair').classList.toggle('hidden', screen !== 'playing' || !!this.game.player.driving);
   }
 
-  update(dt, playerPos) {
-    // In-game clock: one game hour per two real minutes.
-    this.gameMinutes = (this.gameMinutes + dt * 0.5) % (24 * 60);
-    const hh = Math.floor(this.gameMinutes / 60);
-    const mm = Math.floor(this.gameMinutes % 60);
-    const icon = hh >= 6 && hh < 18 ? '☀' : '☾';
-    this.el.clock.childNodes[0].textContent = `${icon} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}  •  `;
-    this.el.district.textContent = districtAt(playerPos.x, playerPos.z);
+  showBanner(title, sub) {
+    this.el('banner-title').textContent = title;
+    this.el('banner-sub').textContent = sub || '';
+    this.el('banner').classList.remove('hidden');
+    this.bannerTimer = 3.2;
+  }
+
+  hideBanner() {
+    this.el('banner').classList.add('hidden');
+  }
+
+  message(text) {
+    this.messages.push({ text, t: 0 });
+    if (this.messages.length > 4) this.messages.shift();
+    const feed = this.el('feed');
+    feed.innerHTML = this.messages.map((m) => `<div class="msg">${m.text}</div>`).join('');
+  }
+
+  flashWanted() {
+    this.wantedFlash = 1;
+  }
+
+  update(dt) {
+    const g = this.game;
     if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
-      if (this.bannerTimer <= 0) this.el.banner.classList.remove('show');
+      if (this.bannerTimer <= 0) this.hideBanner();
     }
+    if (this.wantedFlash > 0) this.wantedFlash -= dt;
+    for (const m of this.messages) m.t += dt;
+    this.messages = this.messages.filter((m) => m.t < 9);
+    if (g.state !== 'playing') return;
+
+    this.el('cash').textContent = money(g.cash);
+    this.el('health-fill').style.width = Math.max(0, g.health) + '%';
+    this.el('health-fill').style.background = g.health > 50 ? '#22c55e' : g.health > 25 ? '#f59e0b' : '#ef4444';
+    this.el('armor-fill').style.width = Math.max(0, g.armor) + '%';
+    const stars = '★'.repeat(g.police.wanted) + '☆'.repeat(5 - g.police.wanted);
+    const wantedEl = this.el('wanted');
+    wantedEl.textContent = stars;
+    wantedEl.style.color = this.wantedFlash > 0 && Math.sin(g.time * 16) > 0 ? '#ffffff' : '#ffd60a';
+    this.el('objective').textContent = g.missions.objectiveText();
+    this.el('district').textContent = g.city.districtAt(g.player.x, g.player.z);
+    this.el('clock').textContent = clockString(g.dayHours);
+    const speed = g.player.driving ? Math.abs(g.player.driving.speed) * 3.6 : 0;
+    this.el('speed').textContent = g.player.driving ? Math.round(speed) + ' km/h' : '';
+    this.el('mission-count').textContent = `Jobs done: ${g.missions.completed} / 5`;
+    this.el('crosshair').classList.toggle('hidden', !!g.player.driving || !!g.noCrosshair);
+    this.drawMinimap();
   }
 
-  // ---- the minimap ---------------------------------------------------------
-  // North-up, 220px across, showing roads, the beach, the player arrow, the
-  // mission marker, police cruisers and traffic.
-  drawMinimap(state) {
+  drawMinimap() {
+    const g = this.game;
     const ctx = this.mapCtx;
-    const S = 220;
-    const scale = S / (WORLD.cityHalf * 2 + 60);
-    const toMap = (x, z) => [S / 2 + x * scale, S / 2 + z * scale];
+    const S = 190;
+    const scale = S / 920;
+    const toMap = (x, z) => [(x + 460) * scale, (z + 460) * scale];
     ctx.clearRect(0, 0, S, S);
-
-    // Water and sand at the south edge.
-    ctx.fillStyle = '#1e7fa8';
-    ctx.fillRect(0, S / 2 + WORLD.beachZ * scale, S, S);
+    ctx.fillStyle = 'rgba(8, 20, 32, 0.88)';
+    ctx.fillRect(0, 0, S, S);
+    // Ocean + beach.
+    ctx.fillStyle = '#1b7fa8';
+    ctx.fillRect((380 + 460) * scale, 0, S - (380 + 460) * scale, S);
     ctx.fillStyle = '#e8d29a';
-    ctx.fillRect(0, S / 2 + (WORLD.beachZ - 30) * scale, S, 30 * scale + 4);
-    // City ground.
-    ctx.fillStyle = '#2c3d5c';
-    ctx.fillRect(0, 0, S, S / 2 + WORLD.beachZ * scale);
-    // Blocks.
-    ctx.fillStyle = '#4a5f86';
-    const half = (9 * PITCH) / 2;
-    for (let bx = 0; bx < 9; bx++) {
-      for (let bz = 0; bz < 9; bz++) {
-        const [x, z] = toMap(-half + bx * PITCH + 6, -half + bz * PITCH + 6);
-        ctx.fillRect(x, z, 42 * scale, 42 * scale);
-      }
-    }
+    ctx.fillRect((380 + 460) * scale - 6, 0, 6, S);
     // Roads.
-    ctx.strokeStyle = '#8a94a6';
-    ctx.lineWidth = 2;
-    for (const c of roadLines()) {
-      const [x1] = toMap(c, -half);
-      const [x2] = toMap(c, half);
-      ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, S); ctx.stroke();
-      const [, z1] = toMap(-half, c);
-      ctx.beginPath(); ctx.moveTo(0, z1); ctx.lineTo(S, z1); ctx.stroke();
+    ctx.strokeStyle = '#5b6470';
+    ctx.lineWidth = 3;
+    for (const z of g.city.roadsH) {
+      const [x1, y1] = toMap(-460, z);
+      const [x2, y2] = toMap(460, z);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
     }
-    // Park and pier.
-    ctx.fillStyle = '#5da24f';
-    const [px, pz] = toMap(0, 0);
-    ctx.fillRect(px - 20 * scale, pz - 20 * scale, 40 * scale, 40 * scale);
-    ctx.strokeStyle = '#8a6d3b'; ctx.lineWidth = 3;
-    ctx.beginPath();
-    const [ax, az] = toMap(14, WORLD.beachZ);
-    const [bx2, bz2] = toMap(14, WORLD.beachZ + 62);
-    ctx.moveTo(ax, az); ctx.lineTo(bx2, bz2); ctx.stroke();
-
+    for (const x of g.city.roadsV) {
+      const [x1, y1] = toMap(x, -460);
+      const [x2, y2] = toMap(x, 460);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
     // Mission marker.
-    if (state.marker) {
-      const [mx, mz] = toMap(state.marker.pos.x, state.marker.pos.z);
-      const pulse = 6 + Math.sin(performance.now() / 200) * 2;
-      ctx.fillStyle = '#ffd23e';
-      ctx.beginPath(); ctx.arc(mx, mz, pulse, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(mx, mz, pulse + 3, 0, Math.PI * 2); ctx.stroke();
+    const step = g.missions.currentStep();
+    if (step && step.x !== undefined && !g.missions.done) {
+      const [mx, my] = toMap(step.x, step.z);
+      const pulse = 5 + Math.sin(g.time * 5) * 2;
+      ctx.fillStyle = '#ffc300';
+      ctx.beginPath();
+      ctx.arc(mx, my, pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
-    // Traffic (grey dots) and police (flashing blue/red).
-    ctx.fillStyle = '#cbd5e1';
-    for (const car of state.traffic) {
-      const [cx, cz] = toMap(car.pos.x, car.pos.z);
-      ctx.fillRect(cx - 1.5, cz - 1.5, 3, 3);
+    // Cop blips.
+    ctx.fillStyle = Math.sin(g.time * 8) > 0 ? '#ff4444' : '#4488ff';
+    for (const c of g.police.copCars) {
+      const [cx, cy] = toMap(c.mesh.position.x, c.mesh.position.z);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
     }
-    const flashOn = Math.floor(performance.now() / 300) % 2 === 0;
-    ctx.fillStyle = flashOn ? '#3b82f6' : '#ef4444';
-    for (const car of state.policeCars) {
-      const [cx, cz] = toMap(car.pos.x, car.pos.z);
-      ctx.beginPath(); ctx.arc(cx, cz, 3.5, 0, Math.PI * 2); ctx.fill();
+    // Enemy blips.
+    ctx.fillStyle = '#ff2222';
+    for (const e of g.combat.enemies) {
+      const [ex, ey] = toMap(e.mesh.position.x, e.mesh.position.z);
+      ctx.fillRect(ex - 2.5, ey - 2.5, 5, 5);
     }
-    // The player: a white arrow that turns with the heading.
-    const [ux, uz] = toMap(state.player.x, state.player.z);
+    // Player arrow.
+    const [px, py] = toMap(g.player.x, g.player.z);
     ctx.save();
-    ctx.translate(ux, uz);
-    ctx.rotate(-state.player.heading + Math.PI);
-    ctx.fillStyle = '#fff';
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+    ctx.translate(px, py);
+    ctx.rotate(-g.player.heading + Math.PI);
+    ctx.fillStyle = g.player.driving ? '#4ade80' : '#ffffff';
     ctx.beginPath();
-    ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(0, 3); ctx.lineTo(-5, 6); ctx.closePath();
-    ctx.fill(); ctx.stroke();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
+    // North + view cone.
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('N', 6, 14);
   }
 }

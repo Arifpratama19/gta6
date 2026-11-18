@@ -1,146 +1,142 @@
-// SOLMAR BAY — world constants, vehicle roster and the story mission chain.
-// Every number the rest of the game shares lives here so tuning is one place.
+// SOLMAR BAY — shared tuning, palette and story data.
+// A sun-soaked coastal city on the fictional Vice Coast. Everything here is
+// original: the city, its districts, its people and its story.
 
-export const WORLD = {
-  seed: 20261118,
-  blockSize: 42,          // one city block, edge to edge
-  roadWidth: 13,          // road surface between blocks
-  grid: 9,                // 9 x 9 blocks
-  beachZ: 236,            // sand starts here (south edge)
-  oceanZ: 268,            // water starts here
-  pierZ: 300,             // the pier reaches into the sea
-  cityHalf: 240,          // playable bounds on x / north z
-  gravity: 26,
+export const CONFIG = {
+  title: 'SOLMAR BAY',
+  subtitle: 'Vice Coast Stories',
+  world: {
+    half: 450,            // playable half-extent in metres
+    roadStep: 90,         // distance between parallel roads
+    roadWidth: 15,
+    beachX: 380,          // east of this the sand starts
+    waterX: 430,          // east of this the ocean starts
+  },
+  player: {
+    walkSpeed: 6.5,
+    runSpeed: 11,
+    health: 100,
+    startCash: 500,
+  },
+  car: {
+    accel: 26,
+    brake: 42,
+    reverseAccel: 14,
+    maxSpeed: 46,
+    maxReverse: 12,
+    steer: 1.9,
+    grip: 6.5,
+  },
+  wanted: {
+    max: 5,
+    decayQuietSeconds: 18,
+    decayStepSeconds: 7,
+  },
+  traffic: { count: 16, minSpeed: 7, maxSpeed: 13 },
+  peds: { count: 26 },
+  palette: {
+    skyTop: 0x2f7fd0,
+    skyBottom: 0xffd9a0,
+    sun: 0xfff1c4,
+    ocean: 0x1b7fa8,
+    sand: 0xe8d29a,
+    asphalt: 0x2e2f36,
+    sidewalk: 0x9a938a,
+    grass: 0x4f9e4d,
+  },
+  districts: [
+    { name: 'Downtown', cx: -40, cz: -120, r: 170, tall: true },
+    { name: 'Neon Plaza', cx: -180, cz: 140, r: 130, tall: false },
+    { name: 'Marina', cx: 300, cz: -180, r: 120, tall: false },
+    { name: 'Little Havana Row', cx: -260, cz: -260, r: 120, tall: false },
+    { name: 'The Docks', cx: 300, cz: 240, r: 120, tall: false },
+  ],
 };
 
-// A block's pitch: block + road.
-export const PITCH = WORLD.blockSize + WORLD.roadWidth;
-
-// Road centre lines, in world units, from west to east / north to south.
-// The grid stops before the beach: no road runs across the sand.
-export function roadLines() {
-  const lines = [];
-  const half = (WORLD.grid * PITCH) / 2;
-  for (let i = 0; i <= WORLD.grid; i++) {
-    const v = -half + i * PITCH + WORLD.roadWidth / 2;
-    if (v < WORLD.beachZ - WORLD.roadWidth) lines.push(v);
-  }
-  return lines;
-}
-
-// Districts, named by quadrant, for the HUD clock line.
-export function districtAt(x, z) {
-  if (z > 190) return 'Ocean Drive';
-  if (z > 90) return 'Marina District';
-  if (x < -60) return 'Westside';
-  if (x > 60) return 'East Bay';
-  if (z < -90) return 'North Hills';
-  return 'Downtown';
-}
-
-export const PLAYER = {
-  walkSpeed: 6.5,
-  runSpeed: 11,
-  jumpSpeed: 9.5,
-  radius: 0.55,
-  height: 1.8,
-  maxHealth: 100,
-  startCash: 250,
+// The story: Rico Vega, a getaway driver back in Solmar Bay, takes jobs from
+// Mara Solis to pay off his brother's debt to the Coral Kings crew.
+export const STORY = {
+  hero: 'Rico Vega',
+  fixer: 'Mara Solis',
+  crew: 'Coral Kings',
+  intro:
+    'Rico Vega is back in Solmar Bay. His brother owes the Coral Kings $50,000. ' +
+    'Mara Solis has five jobs that pay it off — if Rico survives them.',
 };
 
-export const VEHICLES = [
-  { id: 'comet',   name: 'Comet GT',      color: 0xff3b30, top: 46, accel: 26, grip: 2.6, kind: 'sport' },
-  { id: 'solmar',  name: 'Solmar Sedan',  color: 0x3b82f6, top: 34, accel: 18, grip: 2.0, kind: 'sedan' },
-  { id: 'taxi',    name: 'Bay Taxi',      color: 0xfacc15, top: 32, accel: 16, grip: 1.9, kind: 'taxi' },
-  { id: 'van',     name: 'Cargo Van',     color: 0xe5e7eb, top: 28, accel: 13, grip: 1.6, kind: 'van' },
-  { id: 'pickup',  name: 'Dune Pickup',   color: 0x22c55e, top: 36, accel: 19, grip: 2.2, kind: 'pickup' },
-  { id: 'police',  name: 'SPPD Cruiser',  color: 0x111827, top: 42, accel: 24, grip: 2.5, kind: 'police' },
-  { id: 'muscle',  name: 'V8 Muscle',     color: 0xa855f7, top: 44, accel: 25, grip: 2.3, kind: 'muscle' },
-];
-
-// The story: six jobs for Lucia Vega. Each mission is a list of steps; a step
-// finishes when its condition is met, then the next one starts.
 export const MISSIONS = [
   {
-    id: 'm1', title: 'WELCOME TO SOLMAR', reward: 400,
-    briefing: 'Rico is waiting at the pier bar. Go meet him — on foot or in a car.',
+    id: 'borrowed-wheels',
+    title: '1 — Borrowed Wheels',
+    brief: 'Mara needs wheels. Take any car on the street and bring it to the Marina.',
+    reward: 300,
     steps: [
-      { type: 'goto', text: 'Meet Rico at the Pier Bar', pos: [14, 258], radius: 6 },
+      { type: 'enterCar', text: 'Steal a car — walk up to one and press E' },
+      { type: 'reach', x: 300, z: -180, radius: 14, text: 'Drive to the Marina marker' },
     ],
-    complete: 'Rico has a job for you. First, you need wheels.',
   },
   {
-    id: 'm2', title: 'HOT WHEELS', reward: 600,
-    briefing: 'Steal any car on the street and bring it to Rico\'s garage in Westside.',
+    id: 'the-drop',
+    title: '2 — The Drop',
+    brief: 'A package is waiting on the pier. Grab it on foot, then deliver it to Neon Plaza.',
+    reward: 600,
     steps: [
-      { type: 'enterCar', text: 'Steal a car (walk up and press E)', radius: 0 },
-      { type: 'goto', text: 'Deliver the car to Rico\'s Garage', pos: [-176, -40], radius: 8, needCar: true },
+      { type: 'reach', x: 330, z: 60, radius: 10, text: 'Go to the pier pickup' },
+      { type: 'pickup', x: 330, z: 60, radius: 6, text: 'Pick up the package (walk into the marker)' },
+      { type: 'reach', x: -180, z: 140, radius: 14, text: 'Deliver the package to Neon Plaza' },
     ],
-    complete: 'Nice wheels. Rico knows a fence who pays for clean titles.',
   },
   {
-    id: 'm3', title: 'THE PACKAGE', reward: 900,
-    briefing: 'Pick up the package at the docks, then drop it at the Sunset Motel. Keep it quiet.',
+    id: 'hot-pursuit',
+    title: '3 — Hot Pursuit',
+    brief: 'The drop was watched. The Solmar Bay PD is on you — lose them and reach the safehouse.',
+    reward: 800,
+    heat: 2,
     steps: [
-      { type: 'goto', text: 'Pick up the package at the Docks', pos: [196, 120], radius: 6 },
-      { type: 'goto', text: 'Deliver it to the Sunset Motel', pos: [-150, 150], radius: 7 },
+      { type: 'reach', x: -260, z: -260, radius: 14, text: 'Reach the safehouse in Little Havana Row' },
     ],
-    complete: 'Delivered clean. The client is impressed — and the cops are watching.',
   },
   {
-    id: 'm4', title: 'LOSE THE HEAT', reward: 800,
-    briefing: 'The drop was spotted. The SPPD is on you — lose them before they box you in.',
+    id: 'pier-showdown',
+    title: '4 — Pier Showdown',
+    brief: 'The Coral Kings sent shooters to the pier. Clear them out.',
+    reward: 1200,
     steps: [
-      { type: 'escape', text: 'Lose the police — get your wanted level to zero', radius: 0 },
+      { type: 'reach', x: 330, z: 60, radius: 26, text: 'Get to the pier' },
+      { type: 'eliminate', count: 5, x: 330, z: 60, text: 'Defeat the Coral Kings shooters (0/5)' },
     ],
-    wanted: 2,
-    complete: 'Clean. You drive like you were born here, Lucia.',
   },
   {
-    id: 'm5', title: 'BANK RUN', reward: 2500,
-    briefing: 'Rico\'s crew is hitting the Solmar National Bank. Grab the cash and get out — the guards are armed.',
+    id: 'the-big-score',
+    title: '5 — The Big Score',
+    brief: 'Last job. Grab the getaway car and run the docks blockade to the east pier.',
+    reward: 2500,
+    heat: 3,
     steps: [
-      { type: 'goto', text: 'Reach the Solmar National Bank', pos: [30, -30], radius: 7 },
-      { type: 'grab', text: 'Grab the cash — hold the bank (stay 20s)', pos: [30, -30], radius: 12, hold: 20 },
-      { type: 'escape', text: 'Escape with the money — lose the cops', radius: 0 },
+      { type: 'enterCar', text: 'Take the getaway car at the Marina' },
+      { type: 'reach', x: 330, z: 240, radius: 16, text: 'Break through to the Docks pier' },
     ],
-    wanted: 3,
-    complete: '$2,500 richer. One last job and you are free of the debt.',
-  },
-  {
-    id: 'm6', title: 'THE BIG SCORE', reward: 5000,
-    briefing: 'The yacht "Golden Hour" leaves at dawn with the city\'s dirty money. Board it and take what is yours.',
-    steps: [
-      { type: 'goto', text: 'Reach the Marina and board the yacht', pos: [120, 250], radius: 8 },
-      { type: 'grab', text: 'Crack the safe — hold the deck (stay 25s)', pos: [120, 250], radius: 12, hold: 25 },
-      { type: 'goto', text: 'Escape to the North Hills lookout', pos: [-20, -210], radius: 9 },
-    ],
-    wanted: 3,
-    complete: 'THE BIG SCORE IS YOURS. Solmar Bay is yours now, Lucia.',
   },
 ];
 
-// Ambient side activities the player can do any time.
-export const ACTIVITIES = {
-  stuntJumpReward: 150,
-  taxiFare: 120,
-};
+export const CAR_COLORS = [
+  0xd7263d, 0x1b9aaa, 0xf4d35e, 0x3a86ff, 0x8338ec, 0xff6d00,
+  0x06d6a0, 0xef476f, 0x118ab2, 0x8ac926, 0xe0e0e0, 0x222222,
+];
 
-export const WANTED = {
-  maxStars: 5,
-  decaySeconds: 26,        // hidden this long at 1-2 stars to drop a star
-  decaySecondsHigh: 40,    // at 3+ stars
-  policePerStar: [0, 2, 3, 4, 6, 8],
-  bustRadius: 2.4,
-  bustHoldSeconds: 1.6,
-};
+export const PED_SHIRTS = [
+  0xe63946, 0xf4a261, 0x2a9d8f, 0xe9c46a, 0x6d28d9, 0xef476f,
+  0x118ab2, 0xffffff, 0x43aa8b, 0xf3722c, 0x577590, 0x90be6d,
+];
 
-export const COLORS = {
-  sky: 0x87c5e8,
-  fog: 0x9fc8e8,
-  sand: 0xe8d29a,
-  water: 0x1e7fa8,
-  road: 0x2b2f36,
-  sidewalk: 0x9aa0a8,
-  grass: 0x6fae5e,
-};
+export const CONTROLS = [
+  ['W A S D', 'Move / drive'],
+  ['Mouse', 'Look around (click to lock)'],
+  ['Shift', 'Sprint'],
+  ['E', 'Enter / exit car'],
+  ['Left click', 'Shoot'],
+  ['Space', 'Handbrake / jump'],
+  ['R', 'Radio on / off'],
+  ['M', 'Mute sound'],
+  ['Esc / P', 'Pause'],
+];

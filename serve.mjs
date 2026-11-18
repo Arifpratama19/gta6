@@ -1,14 +1,13 @@
-// SOLMAR BAY — a tiny static server for local play-testing. Serves game/
-// at http://localhost:8080 (and screenshots/ beside it) with no build step.
-// Usage: node serve.mjs [port]
+// Tiny static file server for local play-testing of SOLMAR BAY.
+// Usage: node serve.mjs [port]   — serves game/ at http://localhost:8080/
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = fileURLToPath(new URL('./game', import.meta.url));
-const port = Number(process.argv[2] || 8080);
+const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), 'game');
+const PORT = Number(process.argv[2] || 8080);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -23,21 +22,22 @@ const TYPES = {
 
 const server = createServer(async (req, res) => {
   try {
-    const url = new URL(req.url, 'http://localhost');
-    let path = decodeURIComponent(url.pathname);
-    if (path === '/') path = '/index.html';
-    const file = normalize(join(root, path));
-    if (!file.startsWith(root)) { res.writeHead(403); res.end('forbidden'); return; }
+    const path = normalize(join(ROOT, decodeURIComponent(new URL(req.url, 'http://x').pathname)));
+    if (!path.startsWith(ROOT)) {
+      res.writeHead(403);
+      res.end('forbidden');
+      return;
+    }
+    const file = path.endsWith('/') ? join(path, 'index.html') : path;
     const data = await readFile(file);
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
     res.end(data);
   } catch (err) {
-    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.writeHead(404);
     res.end('not found');
   }
 });
 
-server.listen(port, () => {
-  console.log(`SOLMAR BAY at http://localhost:${port} — open it in desktop Chrome`);
-  console.log(`Screenshot scenes: ?shot=1 menu, ?shot=2 driving, ?shot=3 chase, ?shot=4 pier`);
+server.listen(PORT, () => {
+  console.log(`SOLMAR BAY serving game/ at http://localhost:${PORT}/`);
 });
