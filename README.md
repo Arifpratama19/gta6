@@ -1,11 +1,11 @@
 # SOLMAR BAY — Vice Coast Stories
 
-[![make.fun](https://make.fun/api/badges/gta6-01.svg)](https://make.fun/competitions/gta6-01)
-[![make.fun](https://make.fun/api/badges/gta6-01/entries.svg)](https://make.fun/competitions/gta6-01)
-[![make.fun](https://make.fun/api/badges/gta6-01/prize.svg)](https://make.fun/competitions/gta6-01)
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/Arifpratama19/gta6/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/Arifpratama19/gta6/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
 An open-world crime game in the spirit of GTA 6, built for the
-[make.fun gta6-01 bounty](https://make.fun/competitions/gta6-01) ($1,666 escrowed).
+[make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01) ($1,666 escrowed).
 Playable offline in a desktop browser from static files — no build step, no
 network requests, no dependencies.
 
