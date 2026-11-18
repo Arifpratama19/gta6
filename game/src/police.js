@@ -1,117 +1,142 @@
-// police.js — the wanted system: stars rise with crime, fall with time,
-// and interceptors spawn, chase, ram and bust the player.
-import { POLICE, WANTED, WORLD } from './config.js';
-import { dist, clamp, angleDiff } from './util.js';
-import { makeCar, damageCar } from './vehicles.js';
-import { roadPointNear } from './city.js';
+// The wanted system: stars, police spawns, pursuit, and busts.
+// state.cops is rebuilt every tick from the live cop cars so the HUD,
+// the minimap and the missions always see the same list.
+import { WORLD, COP, ROADS_X, ROADS_Y } from './config.js';
+import { clamp, dist, wrapAngle } from './util.js';
+import { randomRoadPoint } from './city.js';
+import { damagePlayer } from './player.js';
+import { addBanner } from './state.js';
 
-export function addWanted(state, stars, reason) {
-  if (state.wanted >= 5) return;
-  state.wanted = clamp(state.wanted + stars, 0, 5);
-  state.wantedTimer = WANTED.decaySeconds;
-  if (reason) state.hud.toast(reason + '  Wanted level ' + state.wanted + '!');
-  if (state.wanted >= 1) state.audio.setSiren(true, state.time);
-}
+const COP_COLORS = ['#1a1a2e', '#16213e'];
 
-export function clearWanted(state) {
-  state.wanted = 0;
-  state.wantedTimer = 0;
-  state.audio.setSiren(false, state.time);
-}
-
-// Rebuild the live cop list from the cars every tick, so the spawn cap is
-// always measured against the cops that actually exist.
-export function syncCops(state) {
-  state.cops = state.cars.filter((c) => c.isCop && !c.wrecked);
-}
-
-export function updatePolice(state, dt) {
-  // Defensive: spawnCooldown must always be a number (newGame sets it).
-  if (typeof state.spawnCooldown !== 'number' || Number.isNaN(state.spawnCooldown)) {
-    state.spawnCooldown = 0;
-  }
-  syncCops(state);
-  const p = state.player;
-
-  // No heat, no pursuit: once the wanted level hits zero the interceptors
-  // stand down and leave, so a cleared player is never busted by a
-  // leftover cop still circling.
-  if (state.wanted === 0 && state.cops.length > 0) {
-    state.cars = state.cars.filter((c) => !c.isCop);
-    state.cops = [];
-  }
-
-  // Wanted decays one star at a time when the player stays clean.
-  if (state.wanted > 0) {
-    state.wantedTimer -= dt;
-    if (state.wantedTimer <= 0) {
-      state.wanted -= 1;
-      state.wantedTimer = WANTED.decaySeconds;
-      state.hud.toast('Heat cooling off… wanted level ' + state.wanted);
-      if (state.wanted === 0) state.audio.setSiren(false, state.time);
+export function updateWanted(st, dt) {
+  // Stars decay after a quiet stretch with no new crimes.
+  st.crimeTimer += dt;
+  if (st.wanted > 0 && st.crimeTimer > 20) {
+    st.decayTimer += dt;
+    if (st.decayTimer >= 9) {
+      st.decayTimer = 0;
+      st.wanted = Math.max(0, st.wanted - 1);
+      if (st.wanted === 0) addBanner(st, 'You lost the cops.', 'Lay low.');
     }
+  } else {
+    st.decayTimer = 0;
   }
-
-  // Spawn interceptors until the street holds one per star (max 3 at once).
-  const desired = Math.min(state.wanted, POLICE.maxActive);
-  state.spawnCooldown -= dt;
-  if (state.cops.length < desired && state.spawnCooldown <= 0) {
-    state.spawnCooldown = POLICE.spawnGap;
-    const spot = roadPointNear(state.city, Math.random, p.x, p.y, POLICE.spawnMin, POLICE.spawnMax);
-    const cop = makeCar({
-      name: 'Interceptor',
+  // Spawn cops up to the wanted level, throttled by spawnCooldown.
+  st.spawnCooldown = Math.max(0, st.spawnCooldown - dt);
+  const liveCops = st.cars.filter((c) => c.cop && c.hp > 0);
+  if (st.wanted > 0 && liveCops.length < Math.min(st.wanted, COP.maxCount) && st.spawnCooldown <= 0) {
+    const spot = findCopSpawn(st);
+    st.cars.push({
+      id: 'cop' + Math.floor(st.time * 1000) + '-' + liveCops.length,
+      model: 'Interceptor',
+      color: COP_COLORS[liveCops.length % COP_COLORS.length],
       x: spot.x,
       y: spot.y,
-      angle: Math.atan2(p.y - spot.y, p.x - spot.x),
-      color: '#2b4fd9',
-      isCop: true,
-      hp: 160,
+      angle: Math.atan2(st.player.y - spot.y, st.player.x - spot.x),
+      speed: 0,
+      traffic: false,
+      cop: true,
+      hp: 100,
     });
-    state.cars.push(cop);
-    syncCops(state);
+    st.spawnCooldown = 2.5;
   }
-
-  // Pursuit: steer toward the player, close in, ram to stop them.
-  let copTouching = false;
-  for (const cop of state.cops) {
-    const d = dist(cop.x, cop.y, p.x, p.y);
-    const wantAngle = Math.atan2(p.y - cop.y, p.x - cop.x);
-    const turn = clamp(angleDiff(cop.angle, wantAngle), -2.4 * dt, 2.4 * dt);
-    cop.angle += turn;
-    const target = d > 130 ? POLICE.chaseSpeed : POLICE.chaseSpeed * 0.7;
-    cop.speed += clamp(target - cop.speed, -500 * dt, 380 * dt);
+  // Rebuild the cops list from live cop cars every tick.
+  st.cops = st.cars.filter((c) => c.cop && c.hp > 0);
+  st.bustGrace = Math.max(0, (st.bustGrace || 0) - dt);
+  // Pursuit: each cop steers toward the player and closes in.
+  for (const cop of st.cops) {
+    const targetAngle = Math.atan2(st.player.y - cop.y, st.player.x - cop.x);
+    const diff = wrapAngle(targetAngle - cop.angle);
+    cop.angle += clamp(diff, -2.4 * dt, 2.4 * dt);
+    const want = COP.speed * (0.85 + Math.min(st.wanted, 5) * 0.05);
+    cop.speed += (want - cop.speed) * dt * 1.4;
     cop.x += Math.cos(cop.angle) * cop.speed * dt;
     cop.y += Math.sin(cop.angle) * cop.speed * dt;
-    cop.x = clamp(cop.x, 24, WORLD.w - 24);
-    cop.y = clamp(cop.y, 24, WORLD.h - 24);
+    cop.x = clamp(cop.x, 10, WORLD.w - 10);
+    cop.y = clamp(cop.y, 10, WORLD.h - 10);
+    // Bust: a cop catches Rico on foot (not during the post-exit grace).
+    // The cop must stay on him for a short dwell — a brush-by does not bust.
+    if (!st.player.inCar && st.bustGrace <= 0 && dist(cop.x, cop.y, st.player.x, st.player.y) < COP.bustRadius) {
+      st.bustDwell = (st.bustDwell || 0) + dt;
+      if (st.bustDwell >= 1.2) {
+        bustPlayer(st);
+        return;
+      }
+    } else {
+      st.bustDwell = 0;
+    }
+    // Ramming a player's car slows it and shakes the player.
+    if (st.player.inCar && dist(cop.x, cop.y, st.player.x, st.player.y) < 44) {
+      const car = st.cars.find((c) => c.id === st.player.inCar);
+      if (car) car.speed *= 1 - 0.3 * dt;
+    }
+  }
+  // Clean up wrecked cop cars.
+  st.cars = st.cars.filter((c) => !(c.cop && c.hp <= 0));
+  st.cops = st.cars.filter((c) => c.cop && c.hp > 0);
+}
 
-    if (d < 52) {
-      if (p.inCar) {
-        // Ram the player's car. Gentle enough that a chase is survivable
-        // while the player escapes; the car only wrecks after long contact.
-        damageCar(state, p.inCar, POLICE.ramDamage * dt);
-        p.inCar.speed *= 0.96;
-        if (p.inCar.wrecked) {
-          state.bust('Your car was wrecked by the police.');
-        }
-      } else if (p.invulnerable <= 0) {
-        // A cop on foot does not bust instantly: Rico has a moment to
-        // break free or fight back before the cuffs close.
-        copTouching = true;
+// Find a road point a good distance from the player for a cop to spawn.
+// Retries with fresh randomness until it finds one; never returns null.
+export function findCopSpawn(st) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const p = randomRoadPoint(st.rng);
+    const d = dist(p.x, p.y, st.player.x, st.player.y);
+    if (d > 320 && d < 900) return p;
+  }
+  // Fallback: the farthest road intersection from the player.
+  let best = { x: ROADS_X[0], y: ROADS_Y[0] };
+  let bestD = -1;
+  for (const rx of ROADS_X) {
+    for (const ry of ROADS_Y) {
+      const d = dist(rx, ry, st.player.x, st.player.y);
+      if (d > bestD) {
+        bestD = d;
+        best = { x: rx, y: ry };
       }
     }
   }
-  // On foot, the bust only lands after a cop holds Rico for ~1.2 seconds.
-  if (copTouching && state.mode === 'play') {
-    state.bustTimer = (state.bustTimer || 0) + dt;
-    if (state.bustTimer > 1.2) {
-      state.bustTimer = 0;
-      state.bust('The police caught you on foot.');
-    }
-  } else {
-    state.bustTimer = 0;
-  }
-
-  // Siren wails while any star is lit.
-  state.audio.setSiren(state.wanted > 0, state.time);
+  return best;
 }
+
+export function bustPlayer(st) {
+  st.money = Math.max(0, st.money - 100);
+  st.wanted = 0;
+  st.crimeTimer = 0;
+  // Impound the car, drop Rico at the hospital.
+  if (st.player.inCar) {
+    const car = st.cars.find((c) => c.id === st.player.inCar);
+    if (car) {
+      car.traffic = false;
+      car.speed = 0;
+    }
+    st.player.inCar = null;
+  }
+  st.player.x = 300;
+  st.player.y = 1320;
+  st.player.hp = 100;
+  st.hp = 100;
+  st.mode = 'busted';
+  addBanner(st, 'BUSTED', 'Hospital bill: $100. The heat is off — for now.');
+}
+
+export function wastedRespawn(st) {
+  st.money = Math.max(0, st.money - 100);
+  st.wanted = 0;
+  st.crimeTimer = 0;
+  if (st.player.inCar) {
+    const car = st.cars.find((c) => c.id === st.player.inCar);
+    if (car) car.speed = 0;
+    st.player.inCar = null;
+  }
+  st.player.x = 300;
+  st.player.y = 1320;
+  st.player.hp = 100;
+  st.hp = 100;
+  st.gunmen = [];
+  st.mode = 'playing';
+  addBanner(st, 'WASTED', 'You woke up at the hospital. $100 gone.');
+}
+
+export { damagePlayer };

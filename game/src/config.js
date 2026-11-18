@@ -1,76 +1,125 @@
-// config.js — every tunable number for SOLMAR BAY, in one place.
+// SOLMAR BAY — Vice Coast Stories: tuning constants and mission data.
+// All numbers are in world units (1 unit = 1 px at zoom 1) unless noted.
 export const WORLD = { w: 2400, h: 1800 };
-export const ROAD_STEP = 240; // roads form a grid every 240 units
-export const ROAD_W = 64; // road width
-export const BEACH_X = 2080; // sand starts here; ocean east of it
-export const OCEAN_X = 2200; // water starts here
-export const CITY_SEED = 20261118;
+
+export const ROADS_X = [300, 700, 1100, 1500, 1900];
+export const ROADS_Y = [240, 600, 960, 1320];
+export const ROAD_W = 96;
+
+export const BEACH_X = 2100; // sand starts here
+export const WATER_X = 2250; // ocean starts here
 
 export const PLAYER = {
   radius: 14,
-  walk: 235,
-  sprint: 345,
+  walkSpeed: 210,
+  runSpeed: 300,
   hp: 100,
-  enterRange: 78,
+  enterRadius: 52,
 };
 
 export const CAR = {
-  accel: 460,
-  brake: 760,
-  maxSpeed: 660,
-  reverseMax: 190,
-  turnRate: 2.7,
-  grip: 3.2,
-  radius: 22,
-  trafficSpeed: 150,
+  length: 54,
+  width: 26,
+  accel: 420,
+  brake: 700,
+  reverseAccel: 240,
+  maxSpeed: 520,
+  maxReverse: 180,
+  steer: 3.6,
+  drag: 1.6,
 };
 
-export const POLICE = {
-  maxActive: 3,
-  spawnGap: 2.4,
-  spawnMin: 420,
-  spawnMax: 640,
-  ramDamage: 5,
-  bustRange: 46,
-  chaseSpeed: 620,
-};
-
-export const COMBAT = {
-  pistolDamage: 30,
-  pistolRate: 0.24,
+export const PISTOL = {
+  damage: 34,
   bulletSpeed: 950,
-  bulletLife: 0.9,
-  gunmanHp: 60,
-  gunmanDamage: 9,
-  gunmanRange: 520,
-  gunmanShotGap: 1.35,
+  range: 560,
+  fireDelay: 0.22,
+  spread: 0.02,
 };
+
+export const GUNMAN = { hp: 100, radius: 15, shootDelay: 1.4, damage: 8, range: 420 };
+
+export const COP = { speed: 430, ramDamage: 0, bustRadius: 42, maxCount: 5 };
 
 export const WANTED = {
-  steal: 2,
-  shoot: 1,
-  hitPed: 1,
-  decaySeconds: 26,
-  fine: 150,
+  decayIdleSec: 20, // seconds without a crime before stars start falling
+  decayStepSec: 9, // seconds per star lost while idle
+  stealCar: 1,
+  killPed: 1,
+  killCop: 2,
+  killGunman: 0, // gunmen are fair game during the pier mission
 };
 
-export const MISSION_REWARDS = [200, 350, 500, 700, 1000];
-export const START_MONEY = 500;
+export const SITES = {
+  motel: { x: 700, y: 600, name: 'Motel Solana' },
+  casino: { x: 1100, y: 240, name: 'Casino Marbella' },
+  chopShop: { x: 1900, y: 1320, name: 'Chop Shop' },
+  hospital: { x: 300, y: 1320, name: 'Hospital' },
+  marina: { x: 2050, y: 1500, name: 'Marina' },
+  pier: { x: 2290, y: 900, name: 'Pier' },
+};
+
+// Mission chain. Targets are all on roads or the pier so nothing can be
+// blocked by a building. reward is added to the player's money.
+export const MISSIONS = [
+  {
+    id: 0,
+    name: 'First Wheels',
+    brief: 'Rico needs wheels. Steal a car and drive to the Motel Solana.',
+    target: { x: 700, y: 600 },
+    targetName: 'Motel Solana',
+    reward: 200,
+    kind: 'reach',
+    needsCar: true,
+  },
+  {
+    id: 1,
+    name: 'The Comet GT',
+    brief: 'A Comet GT is parked on the casino strip. Steal it and deliver it to the Chop Shop.',
+    target: { x: 1100, y: 240 },
+    targetName: 'Comet GT (casino strip)',
+    reward: 350,
+    kind: 'steal-deliver',
+    carModel: 'Comet GT',
+    deliver: { x: 1900, y: 1320 },
+    deliverName: 'Chop Shop',
+  },
+  {
+    id: 2,
+    name: 'Pier Shootout',
+    brief: 'Rival crew on the pier. Take out all four gunmen.',
+    target: { x: 2290, y: 900 },
+    targetName: 'Pier',
+    reward: 500,
+    kind: 'kill',
+    gunmen: 4,
+  },
+  {
+    id: 3,
+    name: 'Hot Pursuit',
+    brief: 'The heat is on. Hit all three checkpoints while the cops chase you.',
+    target: { x: 300, y: 240 },
+    targetName: 'Checkpoint 1',
+    reward: 700,
+    kind: 'checkpoints',
+    checkpoints: [
+      { x: 300, y: 240 },
+      { x: 1900, y: 600 },
+      { x: 1100, y: 1320 },
+    ],
+  },
+  {
+    id: 4,
+    name: 'The Vault',
+    brief: 'Hit the casino vault, then get to the boat at the marina. Do not get caught.',
+    target: { x: 1100, y: 240 },
+    targetName: 'Casino vault',
+    reward: 1000,
+    kind: 'grab-escape',
+    escape: { x: 2050, y: 1500 },
+    escapeName: 'Marina boat',
+  },
+];
+
 export const SAVE_KEY = 'solmar-bay-save-v1';
-
-export const PALETTE = {
-  grass: '#7fae5a',
-  ground: '#9db98a',
-  road: '#3d3a38',
-  roadLine: '#e8d44d',
-  sidewalk: '#b9b3a4',
-  sand: '#e8d29a',
-  ocean: '#2e7f9e',
-  oceanDeep: '#1d5f7d',
-  buildingRoof: ['#d96b5f', '#e8a34c', '#7fa8c9', '#c9b458', '#9a7fc9', '#6fb08a'],
-  buildingWall: ['#f2e3c8', '#e8d5b0', '#dfe8ee', '#f5d9c2'],
-  palm: '#3f8f4f',
-  carColors: ['#d94f3d', '#3d7fd9', '#e8c53d', '#7fd94f', '#c9c9c9', '#8a5fd9', '#e87f3d'],
-  copBlue: '#2b4fd9',
-  copWhite: '#f2f2f2',
-};
+export const START_MONEY = 500;

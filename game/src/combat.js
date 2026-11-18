@@ -1,145 +1,136 @@
-// combat.js — the pistol: bullets fly as segments, and hits are tested
-// against the whole segment, so a fast bullet can never tunnel through
-// a target between frames.
-import { COMBAT } from './config.js';
-import { segmentHitsCircle, dist } from './util.js';
-import { damageCar } from './vehicles.js';
+// Bullets: movement plus segment-based hit tests. A bullet moves in steps
+// each frame; the hit test measures the distance from a target's centre to
+// the segment the bullet travelled this frame, so a fast bullet can never
+// tunnel through a target between two frames.
+import { PISTOL, GUNMAN, WANTED, PLAYER } from './config.js';
+import { distToSegment, dist } from './util.js';
+import { addWanted } from './vehicles.js';
+import { damagePlayer } from './player.js';
+import { spawnBlood, spawnHitSparks } from './people.js';
+import { shot, enemyShot } from './audio.js';
 
-export function createCombat() {
-  return {
-    fireCooldown: 0,
-    shotsFired: 0,
-    shotsHit: 0,
-    kills: 0,
-  };
-}
-
-export function firePistol(state, tx, ty) {
-  const p = state.player;
-  const c = state.combat;
-  if (c.fireCooldown > 0 || p.inCar) return false;
-  c.fireCooldown = COMBAT.pistolRate;
-  c.shotsFired += 1;
-  const angle = Math.atan2(ty - p.y, tx - p.x);
-  p.angle = angle;
-  const mx = p.x + Math.cos(angle) * 20;
-  const my = p.y + Math.sin(angle) * 20;
-  state.bullets.push({
-    x: mx,
-    y: my,
-    vx: Math.cos(angle) * COMBAT.bulletSpeed,
-    vy: Math.sin(angle) * COMBAT.bulletSpeed,
-    life: COMBAT.bulletLife,
-    from: 'player',
-    px: mx,
-    py: my,
+export function fireGunmanBullet(st, g) {
+  const a = Math.atan2(st.player.y - g.y, st.player.x - g.x) + (st.rng() - 0.5) * 0.12;
+  st.bullets.push({
+    x: g.x + Math.cos(a) * 22,
+    y: g.y + Math.sin(a) * 22,
+    px: g.x,
+    py: g.y,
+    vx: Math.cos(a) * 780,
+    vy: Math.sin(a) * 780,
+    travelled: 0,
+    fromPlayer: false,
   });
-  state.audio.shot();
-  state.particles.push({ x: mx, y: my, life: 0.08, max: 0.08, color: '#ffe9a0', size: 10 });
-  state.addWanted(0, null);
-  return true;
+  enemyShot();
 }
 
-export function enemyShoot(state, gunman) {
-  const p = state.player;
-  const angle = Math.atan2(p.y - gunman.y, p.x - gunman.x);
-  const mx = gunman.x + Math.cos(angle) * 18;
-  const my = gunman.y + Math.sin(angle) * 18;
-  state.bullets.push({
-    x: mx, y: my,
-    vx: Math.cos(angle) * 820,
-    vy: Math.sin(angle) * 820,
-    life: 0.9, from: 'enemy', px: mx, py: my,
-  });
-  state.audio.enemyShot();
-}
-
-export function enemyShootAtCar(state, gunman) {
-  // Gunmen shoot at the car itself when Rico is driving.
-  const p = state.player;
-  const car = p.inCar;
-  if (!car) return;
-  const angle = Math.atan2(car.y - gunman.y, car.x - gunman.x);
-  const mx = gunman.x + Math.cos(angle) * 18;
-  const my = gunman.y + Math.sin(angle) * 18;
-  state.bullets.push({
-    x: mx, y: my,
-    vx: Math.cos(angle) * 820,
-    vy: Math.sin(angle) * 820,
-    life: 0.9, from: 'enemy', px: mx, py: my,
-    targetCar: car,
-  });
-  state.audio.enemyShot();
-}
-
-export function updateBullets(state, dt) {
-  const c = state.combat;
-  if (c.fireCooldown > 0) c.fireCooldown -= dt;
-  const p = state.player;
-  const alive = [];
-  for (const b of state.bullets) {
+export function updateBullets(st, dt) {
+  for (const b of st.bullets) {
     b.px = b.x;
     b.py = b.y;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
-    b.life -= dt;
-    if (b.life <= 0) continue;
-    let consumed = false;
-    if (b.from === 'player') {
-      // Gunmen first.
-      for (const ped of state.peds) {
-        if (ped.dead || !ped.gunman) continue;
-        if (segmentHitsCircle(b.px, b.py, b.x, b.y, ped.x, ped.y, 16)) {
-          ped.hp -= COMBAT.pistolDamage;
-          c.shotsHit += 1;
-          state.audio.hit();
-          state.particles.push({ x: ped.x, y: ped.y, life: 0.25, max: 0.25, color: '#ff5a4d', size: 10 });
-          if (ped.hp <= 0) {
-            ped.dead = true;
-            c.kills += 1;
-            state.missionKills = (state.missionKills || 0) + 1;
+    b.travelled += Math.hypot(b.vx, b.vy) * dt;
+    if (b.travelled > PISTOL.range) {
+      b.dead = true;
+      continue;
+    }
+    if (b.fromPlayer) {
+      // Gunmen.
+      for (const g of st.gunmen) {
+        if (g.hp <= 0) continue;
+        if (distToSegment(g.x, g.y, b.px, b.py, b.x, b.y) < GUNMAN.radius + 4) {
+          g.hp -= PISTOL.damage;
+          b.dead = true;
+          st.stats.hits += 1;
+          spawnHitSparks(st, b.x, b.y);
+          if (g.hp <= 0) {
+            st.stats.kills += 1;
+            addWanted(st, WANTED.killGunman);
+            spawnBlood(st, g.x, g.y);
           }
-          consumed = true;
           break;
         }
       }
-      // Then cop cars.
-      if (!consumed) {
-        for (const car of state.cars) {
-          if (!car.isCop || car.wrecked) continue;
-          if (segmentHitsCircle(b.px, b.py, b.x, b.y, car.x, car.y, 24)) {
-            damageCar(state, car, COMBAT.pistolDamage);
-            c.shotsHit += 1;
-            state.audio.hit();
-            consumed = true;
-            break;
+      if (b.dead) continue;
+      // Pedestrians (collateral).
+      for (const ped of st.peds) {
+        if (ped.hp <= 0) continue;
+        if (distToSegment(ped.x, ped.y, b.px, b.py, b.x, b.y) < PLAYER.radius + 3) {
+          ped.hp = 0;
+          b.dead = true;
+          st.stats.hits += 1;
+          st.stats.kills += 1;
+          addWanted(st, WANTED.killPed);
+          spawnBlood(st, ped.x, ped.y);
+          break;
+        }
+      }
+      if (b.dead) continue;
+      // Cop cars.
+      for (const cop of st.cops) {
+        if (distToSegment(cop.x, cop.y, b.px, b.py, b.x, b.y) < 30) {
+          cop.hp -= PISTOL.damage;
+          b.dead = true;
+          st.stats.hits += 1;
+          spawnHitSparks(st, b.x, b.y);
+          if (cop.hp <= 0) {
+            st.stats.kills += 1;
+            addWanted(st, WANTED.killCop);
           }
+          break;
+        }
+      }
+      if (b.dead) continue;
+      // Traffic cars (damage only).
+      for (const car of st.cars) {
+        if (car.cop) continue;
+        if (distToSegment(car.x, car.y, b.px, b.py, b.x, b.y) < 30) {
+          car.hp -= PISTOL.damage;
+          b.dead = true;
+          st.stats.hits += 1;
+          spawnHitSparks(st, b.x, b.y);
+          break;
         }
       }
     } else {
-      // Enemy bullets: the player on foot, or the player's car.
-      if (b.targetCar) {
-        if (segmentHitsCircle(b.px, b.py, b.x, b.y, b.targetCar.x, b.targetCar.y, 24)) {
-          damageCar(state, b.targetCar, COMBAT.gunmanDamage);
-          if (b.targetCar.wrecked && b.targetCar.driver === 'player') {
-            state.bust('Your car was shot to pieces.');
-          }
-          consumed = true;
-        }
-      } else if (!p.inCar && p.invulnerable <= 0) {
-        if (segmentHitsCircle(b.px, b.py, b.x, b.y, p.x, p.y, 14)) {
-          p.hp -= COMBAT.gunmanDamage;
-          p.invulnerable = 0.4;
-          state.audio.hit();
-          if (p.hp <= 0) {
-            p.hp = 0;
-            state.wasted('You were gunned down.');
-          }
-          consumed = true;
-        }
+      // Enemy bullets hit Rico (on foot or in a car).
+      if (distToSegment(st.player.x, st.player.y, b.px, b.py, b.x, b.y) < PLAYER.radius + 4) {
+        damagePlayer(st, GUNMAN.damage);
+        b.dead = true;
       }
     }
-    if (!consumed && b.life > 0) alive.push(b);
   }
-  state.bullets = alive;
+  st.bullets = st.bullets.filter((b) => !b.dead);
+  st.peds = st.peds.filter((p) => p.hp > 0);
+  st.gunmen = st.gunmen.filter((g) => g.hp > 0);
 }
+
+export function updateGunmen(st, dt) {
+  for (const g of st.gunmen) {
+    // Gunmen hold their ground and face the player; they never chase.
+    g.angle = Math.atan2(st.player.y - g.y, st.player.x - g.x);
+    g.shootTimer -= dt;
+    const d = dist(g.x, g.y, st.player.x, st.player.y);
+    if (g.shootTimer <= 0 && d < GUNMAN.range) {
+      g.shootTimer = GUNMAN.shootDelay + st.rng() * 0.6;
+      fireGunmanBullet(st, g);
+    }
+  }
+}
+
+export function spawnGunmen(st, x, y, count) {
+  st.gunmen = [];
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    st.gunmen.push({
+      x: x + Math.cos(a) * 70,
+      y: y + Math.sin(a) * 55,
+      angle: 0,
+      hp: GUNMAN.hp,
+      shootTimer: 0.8 + i * 0.4,
+    });
+  }
+}
+
+export { shot };

@@ -3,6 +3,10 @@
 // directory and writes /output/dossier.json with buildDossier from the
 // kit's vendor/makefun-game.ts. Node 22 standard library only; the two
 // grader runs must write identical bytes.
+//
+// NOTE: this program never deletes the output directory. The grader runs it
+// with /output mounted as a volume, and removing a mount point fails with
+// EBUSY — so it only creates the directory and copies over it.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +36,6 @@ function copyTree(src, dest) {
   }
 }
 
-fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 copyTree(path.join(here, 'game'), path.join(outDir, 'game'));
 copyTree(path.join(here, 'screenshots'), path.join(outDir, 'screenshots'));

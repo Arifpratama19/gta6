@@ -1,85 +1,64 @@
-// player.js — Rico Vega on foot: movement, entering and leaving cars.
-import { PLAYER, WORLD, BEACH_X, OCEAN_X } from './config.js';
-import { clamp, dist } from './util.js';
-import { resolveBuildingCollision } from './city.js';
+// Rico on foot: WASD movement, health, and the pistol.
+import { WORLD, PLAYER, PISTOL } from './config.js';
+import { clamp, angleTo } from './util.js';
+import { pointInBuilding } from './city.js';
+import { mouse } from './input.js';
 
-export function createPlayer(x, y) {
-  return {
-    x,
-    y,
-    angle: -Math.PI / 2,
-    hp: PLAYER.hp,
-    maxHp: PLAYER.hp,
-    inCar: null,
-    speed: 0,
-    moving: false,
-    shootCooldown: 0,
-    invulnerable: 0,
+export function updatePlayerOnFoot(st, dt, axis, canvas, sprint) {
+  const p = st.player;
+  p.fireTimer = Math.max(0, p.fireTimer - dt);
+  const sp = sprint ? PLAYER.runSpeed : PLAYER.walkSpeed;
+  let mx = axis.x;
+  let my = axis.y;
+  const len = Math.hypot(mx, my);
+  if (len > 1) {
+    mx /= len;
+    my /= len;
+  }
+  const nx = p.x + mx * sp * dt;
+  const ny = p.y + my * sp * dt;
+  if (!pointInBuilding(st.city, nx, p.y, PLAYER.radius)) p.x = nx;
+  if (!pointInBuilding(st.city, p.x, ny, PLAYER.radius)) p.y = ny;
+  p.x = clamp(p.x, 10, WORLD.w - 10);
+  p.y = clamp(p.y, 10, WORLD.h - 10);
+  if (len > 0.1) {
+    p.angle = Math.atan2(my, mx);
+    p.walkFrame += dt * 10;
+  }
+  p.speed = len * sp;
+}
+
+// Aim angle from the player to the mouse cursor (screen -> world).
+export function aimAngle(st, canvas, camera) {
+  const wx = camera.x - canvas.width / 2 + mouse.x;
+  const wy = camera.y - canvas.height / 2 + mouse.y;
+  return angleTo(st.player.x, st.player.y, wx, wy);
+}
+
+export function tryShoot(st, angle) {
+  const p = st.player;
+  if (p.fireTimer > 0) return null;
+  p.fireTimer = PISTOL.fireDelay;
+  st.stats.shots += 1;
+  const a = angle + (Math.random() - 0.5) * PISTOL.spread;
+  const bx = p.x + Math.cos(a) * 22;
+  const by = p.y + Math.sin(a) * 22;
+  const b = {
+    x: bx,
+    y: by,
+    px: bx,
+    py: by,
+    vx: Math.cos(a) * PISTOL.bulletSpeed,
+    vy: Math.sin(a) * PISTOL.bulletSpeed,
+    travelled: 0,
+    fromPlayer: true,
   };
+  st.bullets.push(b);
+  return b;
 }
 
-// Move on foot. Returns the distance actually travelled.
-export function updatePlayerOnFoot(state, dt) {
-  const p = state.player;
-  const mv = state.input.moveVector();
-  const sprint = state.input.down('ShiftLeft') || state.input.down('ShiftRight');
-  const speed = sprint ? PLAYER.sprint : PLAYER.walk;
-  p.moving = mv.x !== 0 || mv.y !== 0;
-  if (p.moving) {
-    p.angle = Math.atan2(mv.y, mv.x);
-    p.x += mv.x * speed * dt;
-    p.y += mv.y * speed * dt;
-    p.speed = speed;
-  } else {
-    p.speed = 0;
-  }
-  p.x = clamp(p.x, 24, OCEAN_X - 24);
-  p.y = clamp(p.y, 24, WORLD.h - 24);
-  // The ocean is waist-deep: wading is slow, never blocked.
-  if (p.x > BEACH_X) {
-    p.x = clamp(p.x, 24, OCEAN_X + 60);
-  }
-  resolveBuildingCollision(state.city, p, PLAYER.radius);
-  if (p.shootCooldown > 0) p.shootCooldown -= dt;
-  if (p.invulnerable > 0) p.invulnerable -= dt;
-  return p.moving ? speed * dt : 0;
-}
-
-// Nearest car the player can enter (within range and roughly beside them).
-export function nearestCar(state, maxDist) {
-  const p = state.player;
-  let best = null;
-  let bestD = maxDist;
-  for (const car of state.cars) {
-    if (car.wrecked) continue;
-    const d = dist(p.x, p.y, car.x, car.y);
-    if (d < bestD) {
-      bestD = d;
-      best = car;
-    }
-  }
-  return best;
-}
-
-export function enterCar(state, car) {
-  const p = state.player;
-  p.inCar = car;
-  car.driver = 'player';
-  p.x = car.x;
-  p.y = car.y;
-}
-
-export function exitCar(state) {
-  const p = state.player;
-  const car = p.inCar;
-  if (!car) return;
-  car.driver = null;
-  p.inCar = null;
-  // Step out to the side of the car, clear of buildings.
-  const sx = car.x + Math.cos(car.angle + Math.PI / 2) * 34;
-  const sy = car.y + Math.sin(car.angle + Math.PI / 2) * 34;
-  p.x = clamp(sx, 24, OCEAN_X - 24);
-  p.y = clamp(sy, 24, WORLD.h - 24);
-  resolveBuildingCollision(state.city, p, PLAYER.radius);
-  p.angle = car.angle;
+export function damagePlayer(st, amount) {
+  st.hp = Math.max(0, st.hp - amount);
+  st.flash = 0.35;
+  if (st.hp <= 0) st.mode = 'wasted';
 }

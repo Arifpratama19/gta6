@@ -1,70 +1,67 @@
 # SOLMAR BAY — Vice Coast Stories
 
-[![gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/c/gta6-01)
-[![rank](https://make.fun/badge/gta6-01/Arifpratama19/gta6/rank.svg)](https://make.fun/c/gta6-01)
-[![reward](https://make.fun/badge/gta6-01/Arifpratama19/gta6/reward.svg)](https://make.fun/c/gta6-01)
+[![make.fun](https://make.fun/api/badges/gta6-01.svg)](https://make.fun/competitions/gta6-01)
+[![make.fun](https://make.fun/api/badges/gta6-01/entries.svg)](https://make.fun/competitions/gta6-01)
+[![make.fun](https://make.fun/api/badges/gta6-01/prize.svg)](https://make.fun/competitions/gta6-01)
 
 An open-world crime game in the spirit of GTA 6, built for the
-[make.fun gta6-01 bounty](https://make.fun/c/gta6-01) — a complete,
-original, playable browser game with no build step and no network requests.
+[make.fun gta6-01 bounty](https://make.fun/competitions/gta6-01) ($1,666 escrowed).
+Playable offline in a desktop browser from static files — no build step, no
+network requests, no dependencies.
 
 ## The game
 
-Rico Vega is back in Solmar Bay — a sun-soaked coastal city of procedural
-streets, traffic, beaches and a marina. Five jobs stand between him and the
-biggest score of his life:
+Rico Vega is back on the coast. **SOLMAR BAY — Vice Coast Stories** is a
+sun-soaked procedural city (2400×1800) with a road grid, beach, ocean, marina
+and pier, explored on foot and by car:
 
-1. **Welcome to Solmar** — meet Dex at the Marina, deliver the package to the Motel Coral.
-2. **Grand Theft Comet** — steal a gold Comet GT and bring it to the Chop Shop.
-3. **Pier Pressure** — clear four gunmen off the Pier, pistol in hand.
-4. **Getaway Driver** — burn through three checkpoints with the whole force after you.
-5. **The Vault** — hit the Casino Aurora vault and escape to the speedboat.
-
-Plus the open city itself: steal any car and drive it, a five-star wanted
-system with police interceptors that chase and ram, pedestrians, traffic,
-pistol combat, a HUD with a live minimap, synthesized WebAudio (engine hum,
-sirens, gunshots — no audio files), and localStorage saves.
+- **Drive & steal** — 19 traffic cars, enter/exit with E, steal any car (the
+  cops notice) and drive with WASD.
+- **5-star wanted system** — police Interceptors spawn, chase and ram you;
+  get busted on foot and you wake up at the hospital $100 lighter.
+- **5-mission story** — First Wheels ($200), The Comet GT ($350), Pier
+  Shootout ($500), Hot Pursuit ($700), The Vault ($1,000). $3,250 in all.
+- **Combat** — pistol with mouse aim, segment-based bullet hit tests, four
+  gunmen holding the pier.
+- **HUD + minimap** — money, health, wanted stars, mission objective, live
+  minimap with the mission marker, cops and gunmen.
+- **Save** — P saves to localStorage, C continues; a finished story loads
+  straight into free roam.
+- **Sound** — fully synthesized WebAudio: engine hum, sirens, gunshots,
+  mission jingles. No audio files.
 
 ## Play
 
 ```sh
 node serve.mjs
-# open http://localhost:8080/game/
+# open http://localhost:8080
 ```
 
-| Key | Action |
-| --- | --- |
-| WASD / arrows | Walk / drive |
-| E | Enter a car, steal it, grab the vault |
-| Click / F | Shoot the pistol |
-| Shift | Sprint on foot |
-| Esc | Pause |
-| M | Mute |
+Controls: **WASD** move / drive · **E** enter & exit cars · **Mouse** aim,
+**Click** shoot · **P** save · **Esc** pause · **R** restart.
 
-## Layout
+## Structure
 
-```
-game/
-  index.html        entry point, HUD and menus
-  src/
-    config.js       every tunable number
-    util.js         math helpers, segment-circle hit tests
-    audio.js        synthesized WebAudio sounds
-    input.js        keyboard and mouse state
-    city.js         procedural city, roads, beach, landmarks
-    player.js       Rico on foot, entering and leaving cars
-    vehicles.js     car physics, traffic AI, theft
-    people.js       pedestrians and gunmen
-    police.js       wanted stars, pursuit, busts
-    combat.js       pistol bullets and hit detection
-    missions.js     the five-mission story chain
-    hud.js          HUD, minimap, toasts, screens
-    save.js         localStorage saves
-    main.js         game loop, camera, rendering
-main.ts             hands the game in as a make.fun dossier
-screenshots/        four real renders of the game
-```
+- `game/index.html` — canvas + module loader
+- `game/src/main.js` — game loop, rendering, menus
+- `game/src/config.js` — tuning + mission data
+- `game/src/city.js` — procedural city, road sampling
+- `game/src/state.js` — game state
+- `game/src/vehicles.js` — cars, driving, theft
+- `game/src/player.js` — on-foot movement + pistol
+- `game/src/people.js` — pedestrians
+- `game/src/police.js` — wanted system + pursuit
+- `game/src/combat.js` — bullets, gunmen
+- `game/src/missions.js` — 5-mission chain
+- `game/src/hud.js` — HUD + minimap
+- `game/src/save.js` — localStorage saves
+- `game/src/audio.js` — synthesized WebAudio
+- `game/src/input.js` — keyboard + mouse, queued actions
+- `game/src/util.js` — seeded RNG + math
+- `main.ts` — the make.fun entry program (Node 22, copies game/ +
+  screenshots/ to /output and writes dossier.json)
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Original work: its city, characters, vehicles,
+names, story, art and sound are all its own.
