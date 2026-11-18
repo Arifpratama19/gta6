@@ -1,51 +1,50 @@
-// SOLMAR BAY — saving: the whole run fits in one localStorage row.
-// One job: write and read the save, nothing else.
+// SOLMAR BAY — saving: the player's cash, health, mission progress, position
+// and wanted level live in localStorage, so CONTINUE picks up where the last
+// session left off.
 
-import { SAVE_KEY } from './config.js';
+const KEY = 'solmar-bay-save-v1';
 
-export function saveGame(state) {
+export function hasSave() {
   try {
-    const data = {
-      version: 1,
-      savedAt: new Date().toISOString(),
-      cash: state.cash,
-      health: state.health,
-      missionIndex: state.missionIndex,
-      missionsDone: state.missionsDone,
-      playerX: state.playerX,
-      playerZ: state.playerZ,
-      playerHeading: state.playerHeading,
-      totalEarned: state.totalEarned,
-      carsStolen: state.carsStolen,
-      rivalsWrecked: state.rivalsWrecked,
-      playSeconds: state.playSeconds,
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    return true;
-  } catch (_) {
+    return localStorage.getItem(KEY) !== null;
+  } catch (err) {
     return false;
   }
 }
 
-export function loadGame() {
+export function saveGame(state) {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const data = {
+      cash: Math.round(state.player.cash),
+      health: Math.round(state.player.health),
+      armor: Math.round(state.player.armor),
+      missionIndex: state.missions.index,
+      missionStep: state.missions.stepIndex,
+      storyDone: state.missions.done,
+      x: state.player.pos.x,
+      z: state.player.pos.z,
+      heading: state.player.heading,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(KEY, JSON.stringify(data));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+export function loadSave() {
+  try {
+    const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 1) return null;
+    if (typeof data.cash !== 'number' || typeof data.missionIndex !== 'number') return null;
     return data;
-  } catch (_) {
+  } catch (err) {
     return null;
   }
 }
 
 export function clearSave() {
-  try { localStorage.removeItem(SAVE_KEY); } catch (_) { /* storage unavailable */ }
-}
-
-export function saveSummary(save) {
-  if (!save) return 'No save yet — a fresh start in Solmar Bay.';
-  const date = new Date(save.savedAt);
-  const when = isNaN(date) ? 'earlier' : date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  return `Saved ${when} — $${save.cash.toLocaleString('en-US')}, ${save.missionsDone} of 5 jobs done.`;
+  try { localStorage.removeItem(KEY); } catch (err) { /* private mode */ }
 }
