@@ -1,20 +1,20 @@
-// save.js — localStorage save / load for SOLMAR BAY.
-import { SAVE_KEY } from "./config.js";
+// save.js — persist Rico's progress in localStorage: money, mission,
+// health and position. Nothing leaves the browser.
+import { SAVE_KEY } from './config.js';
 
 export function saveGame(state) {
   try {
     const p = state.player;
     const data = {
-      v: 1,
-      money: Math.floor(p.money),
-      health: p.health,
+      version: 1,
+      money: state.money,
+      mission: state.mission,
+      hp: Math.round(p.hp),
       x: Math.round(p.x),
       y: Math.round(p.y),
-      missionIndex: state.mission.index,
-      wanted: 0,
       savedAt: Date.now(),
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
   } catch (e) {
     return false;
@@ -23,20 +23,24 @@ export function saveGame(state) {
 
 export function loadGame() {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = window.localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (!d || d.v !== 1) return null;
-    return d;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1) return null;
+    return data;
   } catch (e) {
     return null;
   }
 }
 
-export function hasSave() {
-  return loadGame() !== null;
+export function clearSave() {
+  try {
+    window.localStorage.removeItem(SAVE_KEY);
+  } catch (e) {
+    // Storage may be unavailable; the game still plays.
+  }
 }
 
-export function clearSave() {
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+export function hasSave() {
+  return loadGame() !== null;
 }

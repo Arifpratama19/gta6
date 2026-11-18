@@ -1,192 +1,145 @@
-// combat.js — pistol fire, bullets, enemy gunmen, health and death.
-import { COMBAT, PLAYER } from "./config.js";
-import { mouse, consumeClick } from "./input.js";
-import { dist, circleOBB } from "./util.js";
-import { sfxShoot, sfxHit } from "./audio.js";
+// combat.js — the pistol: bullets fly as segments, and hits are tested
+// against the whole segment, so a fast bullet can never tunnel through
+// a target between frames.
+import { COMBAT } from './config.js';
+import { segmentHitsCircle, dist } from './util.js';
+import { damageCar } from './vehicles.js';
 
-export function createEnemy(x, y) {
+export function createCombat() {
   return {
-    x, y, angle: 0,
-    health: COMBAT.enemyHealth,
-    shootTimer: 0.5 + Math.random(),
-    strafeDir: Math.random() < 0.5 ? 1 : -1,
-    strafeTimer: 0,
-    dead: false,
+    fireCooldown: 0,
+    shotsFired: 0,
+    shotsHit: 0,
+    kills: 0,
   };
 }
 
-function losClear(city, ax, ay, bx, by) {
-  // sample the segment; blocked if any sample lands inside a building
-  for (let i = 1; i < 8; i++) {
-    const t = i / 8;
-    const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
-    for (const b of city.buildings) {
-      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return false;
-    }
-  }
+export function firePistol(state, tx, ty) {
+  const p = state.player;
+  const c = state.combat;
+  if (c.fireCooldown > 0 || p.inCar) return false;
+  c.fireCooldown = COMBAT.pistolRate;
+  c.shotsFired += 1;
+  const angle = Math.atan2(ty - p.y, tx - p.x);
+  p.angle = angle;
+  const mx = p.x + Math.cos(angle) * 20;
+  const my = p.y + Math.sin(angle) * 20;
+  state.bullets.push({
+    x: mx,
+    y: my,
+    vx: Math.cos(angle) * COMBAT.bulletSpeed,
+    vy: Math.sin(angle) * COMBAT.bulletSpeed,
+    life: COMBAT.bulletLife,
+    from: 'player',
+    px: mx,
+    py: my,
+  });
+  state.audio.shot();
+  state.particles.push({ x: mx, y: my, life: 0.08, max: 0.08, color: '#ffe9a0', size: 10 });
+  state.addWanted(0, null);
   return true;
 }
 
-function fireBullet(state, x, y, angle, fromPlayer) {
+export function enemyShoot(state, gunman) {
+  const p = state.player;
+  const angle = Math.atan2(p.y - gunman.y, p.x - gunman.x);
+  const mx = gunman.x + Math.cos(angle) * 18;
+  const my = gunman.y + Math.sin(angle) * 18;
   state.bullets.push({
-    x: x + Math.cos(angle) * 20,
-    y: y + Math.sin(angle) * 20,
-    vx: Math.cos(angle) * COMBAT.bulletSpeed,
-    vy: Math.sin(angle) * COMBAT.bulletSpeed,
-    life: 0.6,
-    fromPlayer,
-    damage: fromPlayer ? COMBAT.pistolDamage : COMBAT.enemyDamage,
+    x: mx, y: my,
+    vx: Math.cos(angle) * 820,
+    vy: Math.sin(angle) * 820,
+    life: 0.9, from: 'enemy', px: mx, py: my,
   });
+  state.audio.enemyShot();
 }
 
-export function updateCombat(state, dt) {
+export function enemyShootAtCar(state, gunman) {
+  // Gunmen shoot at the car itself when Rico is driving.
   const p = state.player;
-  // --- player shooting (mouse aim, click or hold) ---
-  if (!p.onFoot || p.dead) { /* can't shoot from a car */ }
-  else {
-    state._shootT = (state._shootT || 0) - dt;
-    if ((mouse.down || consumeClick()) && state._shootT <= 0 && state.mode === "play") {
-      state._shootT = COMBAT.pistolRate;
-      const ang = Math.atan2(mouse.wy - p.y, mouse.wx - p.x);
-      p.angle = ang;
-      fireBullet(state, p.x, p.y, ang, true);
-      sfxShoot();
-      state.events.push({ type: "shot", x: p.x, y: p.y });
-    }
-  }
-  // --- enemies shoot at the player ---
-  for (const e of state.enemies) {
-    if (e.dead) continue;
-    e.shootTimer -= dt;
-    const d = dist(e.x, e.y, p.x, p.y);
-    e.angle = Math.atan2(p.y - e.y, p.x - e.x);
-    if (!p.onFoot) { /* enemies only engage on foot */ }
-    else if (d < COMBAT.enemyRange && !p.dead && losClear(state.city, e.x, e.y, p.x, p.y)) {
-      if (e.shootTimer <= 0) {
-        e.shootTimer = COMBAT.enemyRate;
-        fireBullet(state, e.x, e.y, e.angle + (Math.random() - 0.5) * 0.14, false);
-        sfxShoot();
-      }
-    }
-    // strafe a little so they don't stand perfectly still
-    e.strafeTimer -= dt;
-    if (e.strafeTimer <= 0) { e.strafeTimer = 1 + Math.random() * 1.5; e.strafeDir *= -1; }
-    e.x += Math.cos(e.angle + Math.PI / 2) * e.strafeDir * 26 * dt;
-    e.y += Math.sin(e.angle + Math.PI / 2) * e.strafeDir * 26 * dt;
-  }
-  // --- bullets fly and hit things ---
+  const car = p.inCar;
+  if (!car) return;
+  const angle = Math.atan2(car.y - gunman.y, car.x - gunman.x);
+  const mx = gunman.x + Math.cos(angle) * 18;
+  const my = gunman.y + Math.sin(angle) * 18;
+  state.bullets.push({
+    x: mx, y: my,
+    vx: Math.cos(angle) * 820,
+    vy: Math.sin(angle) * 820,
+    life: 0.9, from: 'enemy', px: mx, py: my,
+    targetCar: car,
+  });
+  state.audio.enemyShot();
+}
+
+export function updateBullets(state, dt) {
+  const c = state.combat;
+  if (c.fireCooldown > 0) c.fireCooldown -= dt;
+  const p = state.player;
+  const alive = [];
   for (const b of state.bullets) {
+    b.px = b.x;
+    b.py = b.y;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     b.life -= dt;
     if (b.life <= 0) continue;
-    // buildings stop bullets
-    let blocked = false;
-    for (const bd of state.city.buildings) {
-      if (b.x >= bd.x && b.x <= bd.x + bd.w && b.y >= bd.y && b.y <= bd.y + bd.h) { blocked = true; break; }
-    }
-    if (blocked) { b.life = 0; continue; }
-    if (b.fromPlayer) {
-      // hit an enemy?
-      for (const e of state.enemies) {
-        if (e.dead) continue;
-        if (dist(b.x, b.y, e.x, e.y) < 16) {
-          e.health -= b.damage;
-          b.life = 0;
-          sfxHit();
-          state.events.push({ type: "hit", x: e.x, y: e.y });
-          if (e.health <= 0) { e.dead = true; state.events.push({ type: "enemyDown", x: e.x, y: e.y }); }
-          break;
-        }
-      }
-      if (b.life <= 0) continue;
-      // hit a car?
-      for (const c of state.cars) {
-        if (c.destroyed) continue;
-        if (circleOBB(b.x, b.y, 3, c.x, c.y, c.angle, 23, 11)) {
-          c.health -= b.damage;
-          b.life = 0;
-          sfxHit();
-          break;
-        }
-      }
-      if (b.life <= 0) continue;
-      // hit a pedestrian (counts as a crime)
+    let consumed = false;
+    if (b.from === 'player') {
+      // Gunmen first.
       for (const ped of state.peds) {
-        if (ped.state === "down") continue;
-        if (dist(b.x, b.y, ped.x, ped.y) < 12) {
-          ped.state = "down";
-          ped.downTimer = 6;
-          b.life = 0;
-          state.events.push({ type: "pedDown", x: ped.x, y: ped.y });
+        if (ped.dead || !ped.gunman) continue;
+        if (segmentHitsCircle(b.px, b.py, b.x, b.y, ped.x, ped.y, 16)) {
+          ped.hp -= COMBAT.pistolDamage;
+          c.shotsHit += 1;
+          state.audio.hit();
+          state.particles.push({ x: ped.x, y: ped.y, life: 0.25, max: 0.25, color: '#ff5a4d', size: 10 });
+          if (ped.hp <= 0) {
+            ped.dead = true;
+            c.kills += 1;
+            state.missionKills = (state.missionKills || 0) + 1;
+          }
+          consumed = true;
           break;
+        }
+      }
+      // Then cop cars.
+      if (!consumed) {
+        for (const car of state.cars) {
+          if (!car.isCop || car.wrecked) continue;
+          if (segmentHitsCircle(b.px, b.py, b.x, b.y, car.x, car.y, 24)) {
+            damageCar(state, car, COMBAT.pistolDamage);
+            c.shotsHit += 1;
+            state.audio.hit();
+            consumed = true;
+            break;
+          }
         }
       }
     } else {
-      // enemy bullet vs the player (on foot only)
-      if (p.onFoot && !p.dead && dist(b.x, b.y, p.x, p.y) < 14) {
-        damagePlayer(state, b.damage);
-        b.life = 0;
-      }
-      // enemy bullet vs the player's car
-      if (!p.onFoot && p.car && circleOBB(b.x, b.y, 3, p.car.x, p.car.y, p.car.angle, 23, 11)) {
-        p.car.health -= b.damage;
-        b.life = 0;
+      // Enemy bullets: the player on foot, or the player's car.
+      if (b.targetCar) {
+        if (segmentHitsCircle(b.px, b.py, b.x, b.y, b.targetCar.x, b.targetCar.y, 24)) {
+          damageCar(state, b.targetCar, COMBAT.gunmanDamage);
+          if (b.targetCar.wrecked && b.targetCar.driver === 'player') {
+            state.bust('Your car was shot to pieces.');
+          }
+          consumed = true;
+        }
+      } else if (!p.inCar && p.invulnerable <= 0) {
+        if (segmentHitsCircle(b.px, b.py, b.x, b.y, p.x, p.y, 14)) {
+          p.hp -= COMBAT.gunmanDamage;
+          p.invulnerable = 0.4;
+          state.audio.hit();
+          if (p.hp <= 0) {
+            p.hp = 0;
+            state.wasted('You were gunned down.');
+          }
+          consumed = true;
+        }
       }
     }
+    if (!consumed && b.life > 0) alive.push(b);
   }
-  state.bullets = state.bullets.filter(b => b.life > 0);
-  state.enemies = state.enemies.filter(e => !e.dead || e.deadTimer !== undefined);
-  // clean dead enemies after a short linger is handled by missions (they count kills)
-  // --- slow health regen out of combat ---
-  state._regenT = (state._regenT || 0) + dt;
-  if (state._regenT > 1 && p.health > 0 && p.health < PLAYER.health) {
-    state._regenT = 0;
-    p.health = Math.min(PLAYER.health, p.health + 2);
-  }
-}
-
-export function damagePlayer(state, n) {
-  const p = state.player;
-  if (p.dead || p.hurtTimer > 0) return;
-  p.health -= n;
-  p.hurtTimer = 0.35;
-  sfxHit();
-  if (p.health <= 0) {
-    p.health = 0;
-    p.dead = true;
-    state.events.push({ type: "playerDead" });
-  }
-}
-
-export function drawCombat(ctx, state, cam) {
-  for (const b of state.bullets) {
-    ctx.strokeStyle = "#ffd94a";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(b.x - b.vx * 0.012 - cam.x, b.y - b.vy * 0.012 - cam.y);
-    ctx.lineTo(b.x - cam.x, b.y - cam.y);
-    ctx.stroke();
-  }
-  for (const e of state.enemies) {
-    if (e.dead) continue;
-    const sx = e.x - cam.x, sy = e.y - cam.y;
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
-    ctx.beginPath(); ctx.ellipse(2, 4, 13, 9, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.rotate(e.angle);
-    ctx.fillStyle = "#7a1f1f"; // rival gang red
-    ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#222";
-    ctx.fillRect(8, -4, 11, 8);
-    ctx.fillStyle = "#e8b25d";
-    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    // health bar
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.fillRect(sx - 16, sy - 26, 32, 5);
-    ctx.fillStyle = "#e33";
-    ctx.fillRect(sx - 16, sy - 26, 32 * Math.max(0, e.health / COMBAT.enemyHealth), 5);
-  }
+  state.bullets = alive;
 }

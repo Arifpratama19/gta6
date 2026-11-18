@@ -1,140 +1,246 @@
-// missions.js — Rico Vega's 5-mission story chain.
-import { MISSIONS } from "./config.js";
-import { LANDMARKS } from "./city.js";
-import { createCar } from "./vehicles.js";
-import { createEnemy } from "./combat.js";
-import { addWanted } from "./police.js";
-import { dist } from "./util.js";
-import { sfxMission, sfxPickup } from "./audio.js";
+// missions.js — the five-mission story chain of Rico Vega. Each mission is
+// a list of stages; a stage completes by arriving, stealing a named car,
+// clearing gunmen, passing checkpoints, or grabbing the vault.
+import { MISSION_REWARDS } from './config.js';
+import { dist } from './util.js';
+import { makeCar } from './vehicles.js';
+import { spawnGunmen } from './people.js';
 
-export function createMissionState() {
-  return {
-    index: 0,            // 0..4 active, 5 = story complete
-    phase: "go",
-    target: null,        // {x, y, label}
-    data: {},            // per-mission scratch (timers, target car, kills left)
-    banner: null,        // {text, sub, t} shown by the HUD
-    completeTimer: 0,    // delay before the next mission starts
-  };
+const GT_SPOT = { x: 840, y: 360 };
+const PIER_GUNMEN = [
+  { x: 2130, y: 1440 },
+  { x: 2170, y: 1470 },
+  { x: 2140, y: 1560 },
+  { x: 2180, y: 1530 },
+];
+const CHECKPOINTS = [
+  { x: 360, y: 840 },
+  { x: 1200, y: 1320 },
+  { x: 1800, y: 600 },
+];
+
+export const MISSIONS = [
+  {
+    name: 'Welcome to Solmar',
+    briefing: 'Dex is waiting at the Marina with your first job. Pick up the package, then drop it at the Motel Coral.',
+    stages: [
+      { type: 'goto', label: 'Meet Dex at the Marina', target: { x: 2050, y: 1500, r: 90 } },
+      { type: 'goto', label: 'Deliver the package to the Motel Coral', target: { x: 300, y: 300, r: 90 } },
+    ],
+  },
+  {
+    name: 'Grand Theft Comet',
+    briefing: 'A gold Comet GT is parked uptown. Steal it and bring it to the Chop Shop. The cops will not like it.',
+    stages: [
+      { type: 'goto', label: 'Find the gold Comet GT uptown', target: { x: GT_SPOT.x, y: GT_SPOT.y, r: 110 } },
+      { type: 'steal', label: 'Steal the Comet GT', target: { x: GT_SPOT.x, y: GT_SPOT.y, r: 110 } },
+      { type: 'drive', label: 'Deliver the Comet GT to the Chop Shop', target: { x: 120, y: 1210, r: 90 } },
+    ],
+  },
+  {
+    name: 'Pier Pressure',
+    briefing: 'Rival gunmen hold the Pier. Clear them out — your pistol is in your jacket. Stay on foot and aim true. The cops stay clear of the Pier; settle this yourselves.',
+    stages: [
+      { type: 'goto', label: 'Get to the Pier', target: { x: 2160, y: 1500, r: 110 } },
+      { type: 'kill', label: 'Clear the gunmen on the Pier (0/4)', target: { x: 2160, y: 1500, r: 160 } },
+    ],
+  },
+  {
+    name: 'Getaway Driver',
+    briefing: 'The heat is on. Get in a car and burn through all three checkpoints before the cops box you in.',
+    stages: [
+      { type: 'car', label: 'Get in a car', target: null },
+      { type: 'checkpoints', label: 'Hit checkpoint 1 of 3', target: { x: 360, y: 840, r: 95 } },
+    ],
+  },
+  {
+    name: 'The Vault',
+    briefing: 'The Casino Aurora vault is full tonight. Grab the cash, then run for the speedboat at the Marina.',
+    stages: [
+      { type: 'goto', label: 'Get to the Casino Aurora', target: { x: 1200, y: 360, r: 110 } },
+      { type: 'grab', label: 'Grab the vault cash (press E)', target: { x: 1200, y: 360, r: 90 } },
+      { type: 'escape', label: 'Escape to the speedboat at the Marina', target: { x: 2260, y: 1560, r: 90 } },
+    ],
+  },
+];
+
+export function currentMission(state) {
+  return MISSIONS[state.mission] || null;
+}
+export function currentStage(state) {
+  const m = currentMission(state);
+  if (!m) return null;
+  return m.stages[state.missionStage] || null;
 }
 
-function showBanner(state, text, sub) {
-  state.mission.banner = { text, sub: sub || "", t: 3.2 };
+export function missionObjective(state) {
+  const m = currentMission(state);
+  if (!m) return 'All missions complete — Solmar is yours.';
+  const s = currentStage(state);
+  if (!s) return m.name;
+  if (s.type === 'kill') {
+    return `Clear the gunmen on the Pier (${state.missionKills || 0}/4)`;
+  }
+  if (s.type === 'checkpoints') {
+    const done = state.checkpointIndex || 0;
+    return `Hit checkpoint ${done + 1} of ${CHECKPOINTS.length}`;
+  }
+  return s.label;
 }
 
-export function startMission(state, i) {
-  const m = state.mission;
-  m.index = i;
-  m.phase = "go";
-  m.data = {};
-  const def = MISSIONS[i];
-  if (!def) { m.target = null; return; }
-  showBanner(state, "MISSION: " + def.title, def.brief);
-  if (i === 0) {
-    m.target = { x: LANDMARKS.marina.x, y: LANDMARKS.marina.y, label: "Meet your contact" };
-  } else if (i === 1) {
-    // the red coupe parked by the Pier
-    const car = createCar(LANDMARKS.pier.x - 60, LANDMARKS.pier.y + 30, Math.PI / 2, { color: "#d43d2a", parked: true });
-    state.cars.push(car);
-    m.data.targetCar = car;
-    m.target = { x: car.x, y: car.y, label: "Steal the red coupe" };
-  } else if (i === 2) {
-    const spots = [
-      { x: 2240, y: 600 }, { x: 2290, y: 760 }, { x: 2220, y: 1020 }, { x: 2300, y: 1180 },
-    ];
-    m.data.enemies = spots.map(s => { const e = createEnemy(s.x, s.y); state.enemies.push(e); return e; });
-    m.data.killsLeft = 4;
-    m.target = { x: 2260, y: 880, label: "Clear the beach" };
-  } else if (i === 3) {
-    addWanted(state, 3, state.player.x, state.player.y);
-    m.phase = "evade";
-    m.target = { x: state.player.x, y: state.player.y, label: "Lose the cops" };
-    showBanner(state, "MISSION: " + def.title, "3 stars on you. Break line of sight and stay clean until the heat dies down.");
-  } else if (i === 4) {
-    m.target = { x: LANDMARKS.bank.x, y: LANDMARKS.bank.y, label: "Hit the Solmar Bank" };
-    m.data.hold = 0;
+export function missionTarget(state) {
+  const m = currentMission(state);
+  if (!m) return null;
+  const s = currentStage(state);
+  if (!s) return null;
+  if (s.type === 'car') return null;
+  if (s.type === 'checkpoints') {
+    const cp = CHECKPOINTS[state.checkpointIndex || 0];
+    return cp ? { x: cp.x, y: cp.y, label: 'Checkpoint' } : null;
+  }
+  return s.target ? { x: s.target.x, y: s.target.y, label: s.label } : null;
+}
+
+// (Re)start a mission from its first stage, cleaning up the previous try.
+export function startMission(state, index) {
+  state.mission = index;
+  state.missionStage = 0;
+  state.missionKills = 0;
+  state.checkpointIndex = 0;
+  state.missionData = {};
+  // Remove any leftover Comet GT so a re-entered stage can never strand
+  // the player with two of them.
+  state.cars = state.cars.filter((c) => c.name !== 'Comet GT');
+  const m = MISSIONS[index];
+  if (!m) return;
+  state.hud.toast('Mission: ' + m.name);
+  state.hud.setBriefing(m.briefing);
+  if (index === 1) {
+    const gt = makeCar({
+      name: 'Comet GT',
+      x: GT_SPOT.x,
+      y: GT_SPOT.y,
+      angle: 0,
+      color: '#e8c53d',
+      hp: 120,
+    });
+    state.cars.push(gt);
+    state.missionData.gt = gt;
+  }
+  if (index === 2) {
+    // Gunmen spawn when the player reaches the pier (stage 1), not before.
+    state.missionData.gunmenSpawned = false;
+  }
+}
+
+export function restartMission(state) {
+  startMission(state, state.mission);
+}
+
+function advanceStage(state) {
+  state.missionStage += 1;
+  const m = currentMission(state);
+  if (!m) return;
+  if (state.missionStage >= m.stages.length) {
+    completeMission(state);
+    return;
+  }
+  const s = currentStage(state);
+  if (!s) return;
+  // Entering the kill stage spawns the pier gunmen.
+  if (s.type === 'kill' && !state.missionData.gunmenSpawned) {
+    state.missionData.gunmenSpawned = true;
+    spawnGunmen(state, PIER_GUNMEN);
+    state.hud.toast('Gunmen on the Pier — take them down!');
+  }
+  if (s.type === 'checkpoints') {
+    state.checkpointIndex = 0;
+    state.addWanted(3, 'The whole force is after you!');
   }
 }
 
 function completeMission(state) {
-  const m = state.mission;
-  const def = MISSIONS[m.index];
-  state.player.money += def.pay;
-  sfxMission();
-  showBanner(state, "MISSION COMPLETE", def.title + "  —  +$" + def.pay);
-  state.events.push({ type: "missionDone", mission: m.index + 1 });
-  m.completeTimer = 3.5;
-  m.phase = "done";
-  m.target = null;
+  const idx = state.mission;
+  const reward = MISSION_REWARDS[idx] || 0;
+  state.money += reward;
+  state.audio.missionDone();
+  state.audio.pickup();
+  state.hud.toast(`Mission complete: ${MISSIONS[idx].name}  +$${reward}`);
+  state.save();
+  if (idx + 1 >= MISSIONS.length) {
+    state.mission = MISSIONS.length;
+    state.mode = 'complete';
+    state.hud.showComplete(state.money);
+    return;
+  }
+  startMission(state, idx + 1);
 }
 
-export function updateMissions(state, dt) {
-  const m = state.mission;
+export function updateMission(state, dt) {
+  void dt;
+  const m = currentMission(state);
+  if (!m || state.mode !== 'play') return;
+  const s = currentStage(state);
+  if (!s) return;
   const p = state.player;
-  if (m.banner) { m.banner.t -= dt; if (m.banner.t <= 0) m.banner = null; }
-  if (m.index >= MISSIONS.length) return; // story done
-  if (m.phase === "done") {
-    m.completeTimer -= dt;
-    if (m.completeTimer <= 0) {
-      const next = m.index + 1;
-      if (next >= MISSIONS.length) {
-        m.index = next;
-        showBanner(state, "SOLMAR BAY — STORY COMPLETE", "Rico Vega owns this town now. Free roam: keep driving, keep the heat low.");
-        state.events.push({ type: "storyDone" });
-      } else {
-        startMission(state, next);
+
+  if (s.type === 'goto' || s.type === 'escape') {
+    if (dist(p.x, p.y, s.target.x, s.target.y) < s.target.r) {
+      if (state.mission === 0 && state.missionStage === 0) {
+        state.hud.toast('Package picked up. Take it to the Motel Coral.');
+        state.audio.pickup();
       }
+      advanceStage(state);
     }
     return;
   }
-  // count mission-3 kills
-  if (m.index === 2 && m.data.enemies) {
-    m.data.killsLeft = m.data.enemies.filter(e => !e.dead).length;
-    if (m.data.killsLeft <= 0) { completeMission(state); return; }
+  if (s.type === 'steal') {
+    // Accept the GT by name as well as by identity, so a re-spawned GT
+    // still counts if the reference was replaced.
+    if (p.inCar && p.inCar.name === 'Comet GT') {
+      advanceStage(state);
+    }
+    return;
   }
-  const t = m.target;
-  if (!t) return;
-  const d = dist(p.x, p.y, t.x, t.y);
-  if (m.index === 0) {
-    if (d < 70) completeMission(state);
-  } else if (m.index === 1) {
-    if (m.phase === "go") {
-      if (!p.onFoot && p.car === m.data.targetCar) {
-        m.phase = "deliver";
-        m.target = { x: LANDMARKS.garage.x, y: LANDMARKS.garage.y, label: "Deliver to the garage" };
-        showBanner(state, "Nice wheels.", "Now get it to the garage — in one piece.");
-      }
-    } else if (m.phase === "deliver") {
-      if (!p.onFoot && p.car === m.data.targetCar && d < 80) completeMission(state);
+  if (s.type === 'drive') {
+    if (p.inCar && p.inCar.name === 'Comet GT' && dist(p.x, p.y, s.target.x, s.target.y) < s.target.r) {
+      advanceStage(state);
     }
-  } else if (m.index === 2) {
-    // kills drive this mission; the marker is just a guide
-  } else if (m.index === 3) {
-    if (m.phase === "evade") {
-      if (state.wanted === 0) {
-        m.phase = "go";
-        m.target = { x: LANDMARKS.safehouse.x, y: LANDMARKS.safehouse.y, label: "Reach the safehouse" };
-        showBanner(state, "Heat's off.", "Now slip away to the safehouse up north.");
-      }
-    } else if (m.phase === "go") {
-      if (d < 70) completeMission(state);
+    return;
+  }
+  if (s.type === 'kill') {
+    if ((state.missionKills || 0) >= 4) {
+      advanceStage(state);
     }
-  } else if (m.index === 4) {
-    if (m.phase === "go") {
-      if (p.onFoot && d < 60) {
-        m.data.hold += dt;
-        if (m.data.hold >= 5) {
-          m.phase = "escape";
-          m.target = { x: LANDMARKS.marina.x, y: LANDMARKS.marina.y, label: "Escape to the marina" };
-          addWanted(state, 4, p.x, p.y);
-          sfxPickup();
-          showBanner(state, "Cash grabbed!", "4 stars. Lose them and get to the marina — now!");
-        }
-      } else {
-        m.data.hold = Math.max(0, m.data.hold - dt * 2);
-      }
-    } else if (m.phase === "escape") {
-      if (d < 70) completeMission(state);
+    return;
+  }
+  if (s.type === 'car') {
+    if (p.inCar) advanceStage(state);
+    return;
+  }
+  if (s.type === 'checkpoints') {
+    const cp = CHECKPOINTS[state.checkpointIndex || 0];
+    if (!cp) {
+      advanceStage(state);
+      return;
     }
+    if (p.inCar && dist(p.x, p.y, cp.x, cp.y) < 95) {
+      state.checkpointIndex += 1;
+      state.audio.pickup();
+      state.hud.toast(`Checkpoint ${state.checkpointIndex} of ${CHECKPOINTS.length} — keep going!`);
+      if (state.checkpointIndex >= CHECKPOINTS.length) advanceStage(state);
+    }
+    return;
+  }
+  if (s.type === 'grab') {
+    if (dist(p.x, p.y, s.target.x, s.target.y) < s.target.r && state.interactQueued) {
+      state.interactQueued = false;
+      state.money += 0;
+      state.addWanted(4, 'The vault alarm is screaming!');
+      state.audio.pickup();
+      state.hud.toast('Vault cash grabbed! Run for the speedboat!');
+      advanceStage(state);
+    }
+    return;
   }
 }
